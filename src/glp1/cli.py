@@ -166,6 +166,16 @@ def cmd_attention(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_forecast(_: argparse.Namespace) -> int:
+    """Run the rolling-origin backtest of all forecast models (about a minute)."""
+    from glp1 import forecast
+
+    out = forecast.run(get_paths())
+    wins = sum(c["beats"] for c in out["comparisons"])
+    print(f"{len(out['comparisons'])} comparisons, {wins} beat the best baseline")
+    return 0
+
+
 def cmd_study(_: argparse.Namespace) -> int:
     """Run the event study and jump-size model; writes the files under results/."""
     from glp1 import study
@@ -213,6 +223,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("attention", help="Wikipedia attention and the volatility test")
     p.set_defaults(func=cmd_attention)
+
+    p = sub.add_parser("forecast", help="backtest the forecast models against the baselines")
+    p.set_defaults(func=cmd_forecast)
 
     p = sub.add_parser("study", help="run the event study and the jump-size model")
     p.set_defaults(func=cmd_study)
