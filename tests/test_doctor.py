@@ -36,7 +36,7 @@ def test_disk_check_flags_tiny_threshold_and_huge_threshold(tmp_path):
 
 def test_sec_probe_needs_an_identification_string(monkeypatch):
     monkeypatch.delenv("SEC_USER_AGENT", raising=False)
-    c = doctor.check_source("sec edgar", "https://data.sec.gov/", needs_sec_agent=True)
+    c = doctor.check_source("sec edgar", "https://data.sec.gov/", b"{", needs_sec_agent=True)
     assert not c.ok
     assert not c.required
 
@@ -48,6 +48,6 @@ def test_doctor_exit_code_offline(capsys):
 
 @pytest.mark.network
 def test_every_source_is_reachable():
-    results = [doctor.check_source(n, url, sec) for n, (url, sec) in doctor.SOURCES.items()]
+    results = [doctor.check_source(n, *spec) for n, spec in doctor.SOURCES.items()]
     down = [c.name for c in results if not c.ok]
     assert not down, f"unreachable sources: {down}"

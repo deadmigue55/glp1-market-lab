@@ -25,8 +25,8 @@ ledger is built (step 2). None of them is used in a result before that.
 
 | Source | Use | Result | Notes |
 |---|---|---|---|
-| Yahoo Finance chart API | prices, 60-minute bars | HTTP 200 | unofficial; cache raw responses; cross-check against Stooq |
-| Stooq CSV | fallback daily prices | HTTP 200 | |
+| Yahoo Finance chart API | prices, 60-minute bars | HTTP 200, content verified | unofficial; cache raw responses. Needs explicit `period1`/`period2`: `range=max` silently returns a downsampled series (LLY: 169 bars instead of ~2,470) |
+| Stooq CSV | fallback daily prices | **unusable** | returns HTTP 200 but the body is a JavaScript proof-of-work bot challenge, not CSV. Not bypassed. The first doctor run reported it as "ok" because it only checked the status code, so the doctor now checks the body too |
 | Ken French Data Library | daily factors (FF5, momentum) | HTTP 200 | zip download |
 | SEC EDGAR (`data.sec.gov`) | filing acceptance timestamps, XBRL facts | HTTP 200 with identification | requires `SEC_USER_AGENT` ("Name email") |
 | ClinicalTrials.gov API v2 | trial registry, dates | HTTP 200 | |
@@ -34,6 +34,23 @@ ledger is built (step 2). None of them is used in a result before that.
 | Wikimedia pageviews | public attention | HTTP 200 with a descriptive User-Agent | 403 without one |
 | Kalshi public market data | market-implied approval odds | HTTP 200 | read-only public endpoint |
 | GDELT DOC 2.0 | news volume and tone | **HTTP 429** from this machine, repeatedly, spaced 7 s apart | treated as optional. No workaround was attempted. Retry later with an honest User-Agent; news coverage otherwise comes from company releases and EDGAR 8-K/6-K filings, which are the primary record anyway |
+
+### Cross-checks that replace the Stooq fallback
+
+- SPY daily return against the Fama-French market return (`Mkt-RF + RF`): independent sources for the same
+  market, so a correlation below 0.99 flags a data problem.
+- Novo's New York ADR (NVO) against its Copenhagen line (NOVO-B.CO) converted with DKK/USD.
+- Split and dividend sanity: an adjusted-close return that differs from the close return by more than
+  the declared dividend yield on a day without a corporate action is flagged.
+
+### Survivorship gap (known, not fixable with free data)
+
+- Catalent (CTLT, acquired by Novo Holdings in December 2024): Yahoo returns "No data found, symbol may be
+  delisted". Dropped from the universe and documented.
+- WW International (old WW, bankruptcy in 2025): Yahoo's `WW` series starts 2025-06-27, the new entity.
+  The pre-bankruptcy history is not available. WW is excluded from the main loser basket and from SDID
+  donors/treated units; the basket results are reported with and without it where it matters.
+- Any further name found missing in step 1 is listed here by the ingest check, with the dates lost.
 
 Options history is not free anywhere reliable, so a nightly job snapshots option chains from step 8 on.
 That archive starts late, and every result that uses it says so.

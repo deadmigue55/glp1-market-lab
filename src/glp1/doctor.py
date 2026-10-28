@@ -21,32 +21,41 @@ from glp1.config import Paths, sec_user_agent
 MIN_FREE_GB = 5
 BROWSER_UA = "glp1-market-lab/0.1 (https://github.com/deadmigue55/glp1-market-lab)"
 
-# name -> (url, needs the SEC identification header)
-SOURCES: dict[str, tuple[str, bool]] = {
+# name -> (url, bytes the body must contain near the start, needs the SEC identification header).
+# Stooq is deliberately absent: it now serves a JavaScript bot challenge instead of CSV.
+SOURCES: dict[str, tuple[str, bytes, bool]] = {
     "yahoo prices": (
         "https://query1.finance.yahoo.com/v8/finance/chart/LLY?range=5d&interval=1d",
+        b'"chart"',
         False,
     ),
-    "stooq prices": ("https://stooq.com/q/d/l/?s=lly.us&i=d", False),
     "french factors": (
         "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_5_Factors_2x3_daily_CSV.zip",
+        b"PK",
         False,
     ),
-    "sec edgar": ("https://data.sec.gov/submissions/CIK0000059478.json", True),
+    "sec edgar": ("https://data.sec.gov/submissions/CIK0000059478.json", b'"cik"', True),
     "clinicaltrials": (
         "https://clinicaltrials.gov/api/v2/studies?query.term=semaglutide&pageSize=1",
+        b'"studies"',
         False,
     ),
-    "openfda": ("https://api.fda.gov/drug/drugsfda.json?limit=1", False),
+    "openfda": ("https://api.fda.gov/drug/drugsfda.json?limit=1", b'"results"', False),
     "gdelt": (
         "https://api.gdeltproject.org/api/v2/doc/doc?query=semaglutide&mode=artlist&maxrecords=1&format=json",
+        b"{",
         False,
     ),
     "wikipedia views": (
         "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/user/Semaglutide/daily/20260101/20260110",
+        b'"items"',
         False,
     ),
-    "kalshi": ("https://api.elections.kalshi.com/trade-api/v2/markets?limit=1", False),
+    "kalshi": (
+        "https://api.elections.kalshi.com/trade-api/v2/markets?limit=1",
+        b'"markets"',
+        False,
+    ),
 }
 
 
@@ -112,8 +121,8 @@ def check_disk(paths: Paths, min_free_gb: float = MIN_FREE_GB) -> Check:
     )
 
 
-def check_source(name: str, url: str, needs_sec_agent: bool = False) -> Check:
-    """Probe one data source: any HTTP status below 400 counts as reachable."""
+def check_source(name: str, url: str, expect: bytes, needs_sec_agent: bool = False) -> Check:
+    """Probe one data source: reachable (status below 400) and the body starts as expected."""
     headers = {"User-Agent": BROWSER_UA}
     if needs_sec_agent:
         agent = sec_user_agent()
@@ -122,7 +131,15 @@ def check_source(name: str, url: str, needs_sec_agent: bool = False) -> Check:
         headers["User-Agent"] = agent
     try:
         with httpx.stream("GET", url, headers=headers, timeout=20, follow_redirects=True) as r:
-            return Check(name, r.status_code < 400, f"HTTP {r.status_code}", False)
+            head = next(r.iter_bytes(2048), b"")
+            if r.status_code >= 400:
+                return Check(name, False, f"HTTP {r.status_code}", False)
+            # A 200 can still be a bot-challenge page (Stooq did this), so check the content.
+            if expect not in head:
+                return Check(
+                    name, False, f"HTTP {r.status_code} but not the expected content", False
+                )
+            return Check(name, True, f"HTTP {r.status_code}, content as expected", False)
     except httpx.HTTPError as err:
         return Check(name, False, f"{type(err).__name__}: {err}", False)
 
@@ -132,5 +149,5 @@ def run_all(paths: Paths, sources: bool = True) -> list[Check]:
     simple: list[Callable[[], Check]] = [check_duckdb, check_polars, check_pyarrow]
     checks = [*(fn() for fn in simple), check_disk(paths)]
     if sources:
-        checks += [check_source(n, url, sec) for n, (url, sec) in SOURCES.items()]
+        checks += [check_source(n, *spec) for n, spec in SOURCES.items()]
     return checks
