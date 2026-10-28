@@ -29,6 +29,49 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def cmd_ingest(args: argparse.Namespace) -> int:
+    """Download prices and factors into the raw cache, then rebuild the warehouse."""
+    from datetime import date
+
+    import httpx
+
+    from glp1 import warehouse
+    from glp1.ingest import french, yahoo
+    from glp1.universe import UNIVERSE
+
+    paths = get_paths().ensure()
+    end = date.fromisoformat(args.end) if args.end else date.today()
+    with httpx.Client(headers={"User-Agent": yahoo.USER_AGENT}, timeout=30) as client:
+        for sec in UNIVERSE:
+            ok = yahoo.fetch(paths, sec, end, client)
+            print(f"  {'ok     ' if ok else 'missing'} {sec.ticker}")
+    french.fetch(paths)
+    print("  ok      french factors")
+    print(warehouse.build(paths))
+    return 0
+
+
+def cmd_build(_: argparse.Namespace) -> int:
+    """Rebuild the warehouse from the raw cache without touching the network."""
+    from glp1 import warehouse
+
+    print(warehouse.build(get_paths()))
+    return 0
+
+
+def cmd_check(_: argparse.Namespace) -> int:
+    """Run the data contracts on the warehouse; exit 1 when any is an error."""
+    from glp1 import checks, warehouse
+
+    con = warehouse.connect(get_paths())
+    findings = checks.run_all(con)
+    for f in findings:
+        print(f"  {f.severity:<5} {f.check:<14} {f.detail}")
+    errors = [f for f in findings if f.severity == "error"]
+    print(f"\n{len(errors)} errors" if errors else "\nNo errors.")
+    return 1 if errors else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse arguments and run the chosen command."""
     parser = argparse.ArgumentParser(prog="glp1", description=__doc__)
@@ -38,6 +81,16 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("doctor", help="check the environment and probe every data source")
     p.add_argument("--offline", action="store_true", help="skip the network probes")
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("ingest", help="download prices and factors, then build the warehouse")
+    p.add_argument("--end", help="last day to request, YYYY-MM-DD (default: today)")
+    p.set_defaults(func=cmd_ingest)
+
+    p = sub.add_parser("build", help="rebuild the warehouse from the raw cache (no network)")
+    p.set_defaults(func=cmd_build)
+
+    p = sub.add_parser("check", help="run the data contracts on the warehouse")
+    p.set_defaults(func=cmd_check)
 
     args = parser.parse_args(argv)
     return args.func(args)

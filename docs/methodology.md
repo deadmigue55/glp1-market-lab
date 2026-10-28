@@ -119,4 +119,4 @@ through the amendment log at the end: what changed, why, and what had already be
 
 | # | Date | Change | Why | What had been seen |
 |---|---|---|---|---|
-| | | | | |
+| 1 | 2026-10-27 | Section 3: an event whose window `[-1,+1]` reaches past the last date of the Fama-French file (published with a lag of about a month) is analysed with the market-model baseline only and marked as such. | The factor files end 2026-09-30 while prices run to 2026-10-28, so the main model cannot cover the most recent events. | Row counts and last dates of the downloaded files only; no returns or events. |
