@@ -70,6 +70,32 @@ def load(paths: Paths) -> pl.DataFrame:
     )
 
 
+def load_forward(paths: Paths) -> pl.DataFrame:
+    """Read the forward calendar: expected catalysts and the date each one became known."""
+    return pl.read_csv(
+        paths.root / "data" / "ledger" / "forward_calendar.csv",
+        schema_overrides={"window_start": pl.Date, "window_end": pl.Date, "announced_on": pl.Date},
+    )
+
+
+def validate_forward(df: pl.DataFrame, today: date) -> list[str]:
+    """Problems with the forward calendar; an empty list means it is well formed."""
+    problems = []
+    for r in df.iter_rows(named=True):
+        cid = r["catalyst_id"]
+        if r["event_type"] not in TAXONOMY:
+            problems.append(f"{cid}: event_type {r['event_type']!r} not in the taxonomy")
+        if not (r["source_url"] or "").startswith("https://"):
+            problems.append(f"{cid}: source_url must be an https URL")
+        if r["window_start"] > r["window_end"]:
+            problems.append(f"{cid}: window_start is after window_end")
+        if r["announced_on"] is not None and r["announced_on"] > min(today, r["window_end"]):
+            problems.append(f"{cid}: announced_on is in the future or after the window")
+    if df["catalyst_id"].is_duplicated().any():
+        problems.append("duplicate catalyst_id")
+    return problems
+
+
 def day0(occurred_at: datetime, exchange: str, calendar: list[date]) -> date:
     """The first trading day on which the market could react to news at ``occurred_at``.
 

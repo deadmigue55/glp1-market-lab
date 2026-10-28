@@ -82,14 +82,22 @@ def cmd_edgar(args: argparse.Namespace) -> int:
 
 def cmd_ledger(_: argparse.Namespace) -> int:
     """Validate the catalyst ledger and summarise it; exit 1 when any row is malformed."""
+    from datetime import date
+
     from glp1 import ledger
 
     df = ledger.load(get_paths())
     problems = ledger.validate(df)
     for p in problems:
         print(f"  problem  {p}")
+    forward = ledger.load_forward(get_paths())
+    fproblems = ledger.validate_forward(forward, date.today())
+    for p in fproblems:
+        print(f"  problem  forward calendar: {p}")
+    problems += fproblems
     by_type = df.group_by("event_type").len().sort("event_type")
     print(f"{df.height} events; by type: {dict(by_type.iter_rows())}")
+    print(f"{forward.height} upcoming catalysts in the forward calendar")
     print(f"{len(problems)} problems" if problems else "Ledger is well formed.")
     return 1 if problems else 0
 

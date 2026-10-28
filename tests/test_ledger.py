@@ -136,3 +136,30 @@ def test_the_committed_ledger_is_well_formed():
     df = ledger.load(get_paths())
     assert df.height > 0
     assert ledger.validate(df) == []
+
+
+def test_the_forward_calendar_is_well_formed():
+    from glp1.config import get_paths
+
+    df = ledger.load_forward(get_paths())
+    assert df.height > 0
+    assert ledger.validate_forward(df, date(2026, 10, 28)) == []
+
+
+def test_validate_forward_flags_defects():
+    bad = pl.DataFrame(
+        {
+            "catalyst_id": ["a", "a"],
+            "ticker": ["LLY", "LLY"],
+            "event_type": ["rumour", "regulatory"],
+            "title": ["x", "y"],
+            "window_start": [date(2027, 2, 1), date(2027, 1, 1)],
+            "window_end": [date(2027, 1, 1), date(2027, 3, 1)],
+            "announced_on": [None, date(2026, 12, 1)],
+            "source_url": ["http://x", "https://x"],
+            "notes": ["", ""],
+        }
+    )
+    text = "\n".join(ledger.validate_forward(bad, date(2026, 10, 28)))
+    for needle in ("event_type", "https", "window_start", "future", "duplicate"):
+        assert needle in text, needle
