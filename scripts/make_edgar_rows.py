@@ -11,7 +11,7 @@ import polars as pl
 from glp1 import ledger
 
 TODAY = date(2026, 10, 28)
-W = "pp weight loss, headline figure vs the record phase 3 headline at the time (8.0 SCALE; 14.9 STEP 1 from 2020-06-04; 22.5 SURMOUNT-1 from 2022-04-28)"
+W = "pp weight loss, headline figure vs the record phase 3 headline at the time (8.0 SCALE; 14.9 STEP 1 from 2020-06-04; 22.5 SURMOUNT-1 from 2022-04-28; 22.7 REDEFINE 1 from 2024-12-20; 28.7 TRIUMPH-4 from 2025-12-11)"
 GL_L = "% change in the midpoint of the company's own full-year revenue guidance, from the release's prior/updated table"
 GL_N = "pp change in the midpoint of the company's own full-year sales-growth guidance at CER, from the release text"
 
@@ -310,7 +310,7 @@ NOVO = [
         "trial_readout",
         "step-up",
         "STEP UP: semaglutide 7.2 mg 20.7% weight loss",
-        -1.8,
+        -2.0,
         W,
         False,
         "",

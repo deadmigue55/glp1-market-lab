@@ -74,7 +74,7 @@ def cmd_edgar(args: argparse.Namespace) -> int:
             frames.append(df)
     finally:
         client.close()
-    out = paths.processed / "edgar_filings.parquet"
+    out = paths.processed / args.out
     pl.concat(frames, how="diagonal").write_parquet(out)
     print(f"wrote {out}")
     return 0
@@ -132,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("edgar", help="list a company's 8-K/6-K filings and fetch their headlines")
     p.add_argument("--cik", type=int, action="append", required=True, help="SEC CIK, repeatable")
     p.add_argument("--no-text", action="store_true", help="list filings only, fetch no documents")
+    p.add_argument("--out", default="edgar_filings.parquet", help="file name under data/processed")
     p.set_defaults(func=cmd_edgar)
 
     p = sub.add_parser("ledger", help="validate the catalyst ledger")

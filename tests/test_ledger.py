@@ -128,3 +128,11 @@ def test_upper_bound_on_a_non_trading_stated_day_starts_at_the_next_trading_day(
 def test_exact_events_keep_a_single_day_0():
     d = date(2024, 1, 11)
     assert ledger.day0_window(utc(2024, 1, 10, 22, 0), "exact", None, "NYSE", CAL) == (d, d)
+
+
+def test_the_committed_ledger_is_well_formed():
+    from glp1.config import get_paths
+
+    df = ledger.load(get_paths())
+    assert df.height > 0
+    assert ledger.validate(df) == []
