@@ -156,6 +156,16 @@ def cmd_valuation(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_attention(_: argparse.Namespace) -> int:
+    """Download Wikipedia page views and test whether attention predicts volatility."""
+    from glp1 import attention, warehouse
+
+    paths = get_paths().ensure()
+    r = attention.run(paths, warehouse.connect(paths))
+    print(f"{r['pageview_rows']} page-view rows")
+    return 0
+
+
 def cmd_study(_: argparse.Namespace) -> int:
     """Run the event study and jump-size model; writes the files under results/."""
     from glp1 import study
@@ -200,6 +210,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("valuation", help="run the Lilly reverse DCF from SEC fundamentals")
     p.set_defaults(func=cmd_valuation)
+
+    p = sub.add_parser("attention", help="Wikipedia attention and the volatility test")
+    p.set_defaults(func=cmd_attention)
 
     p = sub.add_parser("study", help="run the event study and the jump-size model")
     p.set_defaults(func=cmd_study)

@@ -1,0 +1,77 @@
+{
+ "articles": [
+  "Ozempic",
+  "Wegovy",
+  "Mounjaro",
+  "Zepbound",
+  "Semaglutide",
+  "Tirzepatide",
+  "Eli_Lilly_and_Company",
+  "Novo_Nordisk"
+ ],
+ "pageview_rows": 20379,
+ "first_page_date": {
+  "Ozempic": "2017-12-25",
+  "Wegovy": "2021-06-05",
+  "Mounjaro": "2022-05-13",
+  "Zepbound": "2023-11-09",
+  "Semaglutide": "2017-01-01",
+  "Tirzepatide": "2021-07-08",
+  "Eli_Lilly_and_Company": "2017-01-01",
+  "Novo_Nordisk": "2017-01-01"
+ },
+ "volatility_test": {
+  "LLY": {
+   "level": {
+    "n": 953,
+    "mse_har": 0.2852513443137968,
+    "mse_har_attention": 0.2858455315968921,
+    "gain_pct": -0.2083030614718595,
+    "dm_stat": -0.27482033002586426,
+    "dm_p": 0.7834542781746173
+   },
+   "change": {
+    "n": 953,
+    "mse_har": 0.2852513443137968,
+    "mse_har_attention": 0.2851407775285376,
+    "gain_pct": 0.038761179382051925,
+    "dm_stat": 0.378545389805779,
+    "dm_p": 0.7050254816808242
+   },
+   "both": {
+    "n": 953,
+    "mse_har": 0.2852513443137968,
+    "mse_har_attention": 0.2857989928848135,
+    "gain_pct": -0.1919880771584559,
+    "dm_stat": -0.26394290629849315,
+    "dm_p": 0.791823913135087
+   }
+  },
+  "NVO": {
+   "level": {
+    "n": 953,
+    "mse_har": 0.28226349670695317,
+    "mse_har_attention": 0.28066990175579254,
+    "gain_pct": 0.5645770599997602,
+    "dm_stat": 0.5930775200750582,
+    "dm_p": 0.5531292740846384
+   },
+   "change": {
+    "n": 953,
+    "mse_har": 0.28226349670695317,
+    "mse_har_attention": 0.28223897819613125,
+    "gain_pct": 0.008686390946033296,
+    "dm_stat": 0.1641627207391965,
+    "dm_p": 0.8696030474533364
+   },
+   "both": {
+    "n": 953,
+    "mse_har": 0.28226349670695317,
+    "mse_har_attention": 0.28075524887872605,
+    "gain_pct": 0.5343403755084131,
+    "dm_stat": 0.566181249455085,
+    "dm_p": 0.5712705750238947
+   }
+  }
+ }
+}
