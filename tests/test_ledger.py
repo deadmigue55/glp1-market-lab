@@ -67,7 +67,7 @@ def make(*rows):
 
 
 def test_a_clean_row_validates():
-    assert ledger.validate(make(row())) == []
+    assert ledger.validate(make(row(event_id="LLY-20240110-x"))) == []
 
 
 def test_validate_flags_each_kind_of_defect():
@@ -163,3 +163,47 @@ def test_validate_forward_flags_defects():
     text = "\n".join(ledger.validate_forward(bad, date(2026, 10, 28)))
     for needle in ("event_type", "https", "window_start", "future", "duplicate"):
         assert needle in text, needle
+
+
+def test_derive_confounded_flags_nearby_events_that_share_an_exposed_ticker():
+    rows = [
+        row(event_id="LLY-20240110-a", ticker="LLY", also_affects="NVO"),
+        row(event_id="NVO-20240111-b", ticker="NVO", also_affects="LLY"),  # next day, read-through
+        row(event_id="LLY-20240301-c", ticker="LLY"),  # alone
+        row(event_id="PFE-20240110-d", ticker="PFE", also_affects=""),  # same day, unrelated ticker
+    ]
+    for r in rows:
+        d = r["event_id"].split("-")[1]
+        r["stated_date"] = date(int(d[:4]), int(d[4:6]), int(d[6:]))
+    assert ledger.derive_confounded(make(*rows)) == [True, True, False, False]
+
+
+def test_committed_ledger_flags_cover_the_rule_and_docs_numbers_match():
+    from pathlib import Path
+
+    from glp1.config import get_paths
+
+    df = ledger.load(get_paths())
+    derived = ledger.derive_confounded(df)
+    assert all(c for c, d in zip(df["confounded"].to_list(), derived, strict=True) if d)
+    doc = (Path(get_paths().root) / "docs" / "ledger.md").read_text(encoding="utf-8")
+    assert f"({df.height} events" in doc
+    assert (
+        f"{df.filter(pl.col('surprise').is_not_null()).height} of {df.height} events have one"
+        in doc
+    )
+    assert f"{df['confounded'].sum()} of {df.height} events are flagged" in doc
+    labels = {
+        "earnings_guidance": "Earnings or guidance",
+        "trial_readout": "Trial readout",
+        "regulatory": "Regulatory",
+        "mna_licensing": "M&A or licensing",
+        "pricing_policy": "Pricing or policy",
+        "supply": "Supply",
+        "competitor": "Competitor",
+        "safety": "Safety",
+    }
+    for etype, n in df.group_by("event_type").len().rows():
+        assert f"| {labels[etype]} | {n} |" in doc, etype
+    assert f"`exact` ({df.filter(pl.col('timing') == 'exact').height} events)" in doc
+    assert f"`upper_bound` ({df.filter(pl.col('timing') == 'upper_bound').height} events)" in doc

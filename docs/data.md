@@ -2,7 +2,7 @@
 
 `uv run glp1 ingest` downloads into `data/raw/` (gitignored, every fetch logged in `MANIFEST.csv` with
 URL, time, size and SHA-256). `uv run glp1 build` rebuilds `data/glp1.duckdb` from that cache with no
-network. `uv run glp1 check` runs the data contracts. Prices are daily, 2017-01-02 to 2026-10-28.
+network. `uv run glp1 check` runs the data contracts. Prices are daily from 2017-01-02; the last bar is 2026-10-28 for the FX series, 2026-10-27 for most US equities and 2026-10-26 for NOVO-B.CO and ZEAL.CO (the latest ingest ran before those sessions were final). The cache is not frozen yet: `ingest` overwrites the raw files in place, so a freeze date is set when step 3 starts.
 
 ## Tables
 
@@ -41,3 +41,15 @@ network. `uv run glp1 check` runs the data contracts. Prices are daily, 2017-01-
   now uses `not exists`.
 - DuckDB `corr` returns NaN for a constant series, and `NaN < x` is false in Python, so the cross-checks
   test `not value >= threshold`.
+
+## Review of steps 1-2 (2026-10-28)
+
+An independent read-only review found no defect in the day-0 and window logic and these fixes in the
+rest, all applied: a Novo dateline regex miss (SUSTAIN 7 had the filing date, not the release date);
+Lilly's `announced_on` convention (now a notice shorter than the observed one); `confounded` applied by
+hand and inconsistently (now derived by rule); four timestamps set from press coverage of price moves
+(now date-only); two Novo 2021 reports missing; amendment 3 not matching the data (amendment 4); a
+validator that did not check event ids against dates or the surprise rule; a test of the eligibility
+view that would have passed without the view; docs numbers not tied to the data (now a test). Open:
+the quality checks read `prices`, not `eligible_prices`, so a pre-listing shell series can still
+appear in their counts; a partial bar for "today" is not guarded against.

@@ -4,7 +4,7 @@ Timestamps come from the EDGAR parquet, never typed. Run from the repo root.
 """
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import polars as pl
 
@@ -22,8 +22,8 @@ NOVO = [
         "trial_readout",
         "ph2-sema-obesity",
         "Semaglutide phase 2 obesity trial: up to 13.8% weight loss",
-        5.8,
-        "pp weight loss, headline figure vs the last published phase 3 headline (liraglutide 3.0 mg, SCALE: 8.0)",
+        None,
+        "",
         False,
         "Phase 2, so the benchmark is the best phase 3 result then published.",
         "",
@@ -560,6 +560,30 @@ NOVO = [
         True,
     ),
     (
+        "0001628280-21-008956",
+        "earnings_guidance",
+        "q1-2021",
+        "Novo Q1 2021 report",
+        None,
+        "",
+        False,
+        "",
+        "LLY",
+        True,
+    ),
+    (
+        "0001628280-21-015488",
+        "earnings_guidance",
+        "q2-2021",
+        "Novo Q2 2021 report",
+        None,
+        "",
+        False,
+        "",
+        "LLY",
+        True,
+    ),
+    (
         "0001628280-21-021307",
         "earnings_guidance",
         "q3-2021",
@@ -806,13 +830,28 @@ LILLY = [
     ("0000059478-26-000077", "q2-2026", "Lilly Q2 2026 report, guidance raised", 2.99),
 ]
 
-STATED = re.compile(r"Bagsv[æa]e?rd,? Denmark,? (\d{1,2}) ([A-Z][a-z]+),? (\d{4})")
+STATED = re.compile(r"Bagsv[æa]e?rd\s*,?\s*Denmark\s*,?\s*(\d{1,2}) ([A-Z][a-z]+),? (\d{4})")
 FIN_DATE = re.compile(r"to \d{1,2} [A-Z][a-z]+ \d{4} (\d{1,2}) ([A-Z][a-z]+) (\d{4})")
+
+
+# Days of notice assumed for a scheduled report: shorter than the notice actually observed (Lilly
+# confirmed its Q3 2026 date 14 days ahead; Novo publishes a yearly calendar), so a backtest never
+# knows a date earlier than the company had said it.
+NOTICE_DAYS = {"NVO": 30, "LLY": 7}
+
+
+# Reports whose first document is a results presentation with no dateline: filed on the report day.
+DATELINE_OVERRIDE = {
+    "0001628280-21-008956": date(2021, 5, 5),
+    "0001628280-21-015488": date(2021, 8, 4),
+}
 
 
 def stated_date(lead: str, filed: date) -> date:
     m = FIN_DATE.search(lead[:200]) or STATED.search(lead[:900])
     if not m:
+        if "Novo Nordisk" in lead[:900] or "Bagsv" in lead[:900]:
+            raise ValueError(f"no dateline found in a Novo release: {lead[:120]!r}")
         return filed
     return datetime.strptime(f"{m[1]} {m[2][:3]} {m[3]}", "%d %b %Y").date()
 
@@ -822,9 +861,9 @@ def main() -> None:
     by_acc = {r["accession"]: r for r in df.iter_rows(named=True)}
     rows = []
 
-    def add(acc, ticker, etype, slug, title, sur, basis, conf, notes, also, sched, prev_date=None):
+    def add(acc, ticker, etype, slug, title, sur, basis, conf, notes, also, sched):
         r = by_acc[acc]
-        sd = stated_date(r["lead"], r["filing_date"])
+        sd = DATELINE_OVERRIDE.get(acc) or stated_date(r["lead"], r["filing_date"])
         nodash = acc.replace("-", "")
         rows.append(
             {
@@ -839,7 +878,7 @@ def main() -> None:
                 "timestamp_source": "edgar_acceptance",
                 "source_url": f"https://www.sec.gov/Archives/edgar/data/{r['cik']}/{nodash}/{acc}-index.htm",
                 "scheduled": sched,
-                "announced_on": prev_date if sched else None,
+                "announced_on": sd - timedelta(days=NOTICE_DAYS[ticker]) if sched else None,
                 "surprise": sur,
                 "surprise_basis": basis,
                 "confounded": conf,
@@ -848,30 +887,18 @@ def main() -> None:
             }
         )
 
-    prev = {}
     for acc, etype, slug, title, sur, basis, conf, notes, also, sched in NOVO:
-        r = by_acc[acc]
-        pd_ = None
-        if sched:
-            pd_ = prev.get("NVO")
-            prev["NVO"] = r["filing_date"]
-            if pd_ is None:
-                pd_ = date(2021, 2, 3)
-        add(acc, "NVO", etype, slug, title, sur, basis, conf, notes, also, sched, pd_)
-    # Novo's scheduled reports are announced in its financial calendar; the previous report's date is
-    # a conservative stand-in (documented in the datasheet).
-    prev_l = None
+        add(acc, "NVO", etype, slug, title, sur, basis, conf, notes, also, sched)
     for acc, slug, title, sur in LILLY:
-        r = by_acc[acc]
         conf = acc == "0000059478-23-000219"
         notes = "Novo's SELECT readout came the same day." if conf else ""
         sched = not slug.startswith(("guidance", "prelim"))
-        pd_ = prev_l if prev_l else r["filing_date"]
+        if slug == "prelim-2024":
+            notes = (
+                "Revenue update against the last guided midpoint (45.7), not a change in the range."
+            )
         basis = GL_L if sur is not None else ""
-        add(
-            acc, "LLY", "earnings_guidance", slug, title, sur, basis, conf, notes, "NVO", sched, pd_
-        )
-        prev_l = r["filing_date"]
+        add(acc, "LLY", "earnings_guidance", slug, title, sur, basis, conf, notes, "NVO", sched)
     out = pl.DataFrame(rows, schema=ledger.SCHEMA).sort("occurred_at")
     out.write_csv("data/ledger/catalysts.csv")
     print(out.height, "rows written")

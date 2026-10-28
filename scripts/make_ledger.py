@@ -214,14 +214,14 @@ MANUAL = [
         "LLY;NVO",
         "trial_readout",
         "MariTide phase 2: about 20% weight loss at 52 weeks",
-        local(2024, 11, 26, 9, 0, ET),
+        day_end(2024, 11, 26, ET),
         "upper_bound",
         "media",
         "https://pharmaphorum.com/news/amgens-big-reveal-obesity-data-falls-bit-flat",
         None,
         "",
         False,
-        "Pre-market coverage on the 26th shows the news was out before the open (or the evening before: day 0 is the 26th either way). Amgen release: https://www.amgen.com/newsroom/press-releases/2024/11/amgen-announces-robust-weight-loss-with-maritide-in-people-living-with-obesity-or-overweight-at-52-weeks-in-a-phase-2-study",
+        "Release time not captured; the date is from press coverage. Amgen release: https://www.amgen.com/newsroom/press-releases/2024/11/amgen-announces-robust-weight-loss-with-maritide-in-people-living-with-obesity-or-overweight-at-52-weeks-in-a-phase-2-study",
     ),
     (
         "PFE-20250414-danuglipron-stop",
@@ -229,14 +229,14 @@ MANUAL = [
         "LLY;NVO",
         "competitor",
         "Pfizer ends development of oral GLP-1 danuglipron",
-        local(2025, 4, 14, 8, 0, ET),
+        day_end(2025, 4, 14, ET),
         "upper_bound",
         "media",
         "https://www.businessday.co.za/bd/companies/2025-04-14-pfizer-ends-development-of-weight-loss-pill/",
         None,
         "",
         False,
-        "Pre-market coverage on the 14th (Pfizer shares down 1.2% pre-market) shows the news was out before the open.",
+        "Release time not captured; the date is from press coverage (businessday, 2025-04-14).",
     ),
     (
         "PFE-20250922-metsera",
@@ -244,14 +244,14 @@ MANUAL = [
         "LLY;NVO",
         "mna_licensing",
         "Pfizer to acquire Metsera for $4.9bn",
-        local(2025, 9, 22, 8, 0, ET),
+        day_end(2025, 9, 22, ET),
         "upper_bound",
         "media",
         "https://www.businesswire.com/news/home/20250922965053/en/Pfizer-to-Acquire-Metsera-and-its-Next-Generation-Obesity-Portfolio",
         None,
         "",
         False,
-        "Metsera was up 60% in electronic trading before the Monday open, so the news was out before it.",
+        "Release time not captured; the date is from the Business Wire release and press coverage.",
     ),
     (
         "HIMS-20250623-novo-ends-deal",
@@ -259,14 +259,14 @@ MANUAL = [
         "NVO",
         "mna_licensing",
         "Novo Nordisk ends its Wegovy partnership with Hims & Hers",
-        local(2025, 6, 23, 11, 0, ET),
+        day_end(2025, 6, 23, ET),
         "upper_bound",
         "media",
         "https://qz.com/novo-nordisk-hims-hers-ozempic-wegovy-weight-loss-drugs",
         None,
         "",
         False,
-        "Hims was down about 27% in Monday morning trading, so the news was out by 11:00 ET. For the Copenhagen listing that is after the close, so its day 0 is the next day.",
+        "Date from press coverage and Novo's 23 June release; time not captured. Hims and Novo trade in different time zones, so the window covers both.",
     ),
     (
         "RHHBY-20231204-carmot",
@@ -503,6 +503,9 @@ def main() -> None:
                 .alias(col)
             )
     out = pl.concat([df, manual_frame(), others_frame()]).sort("occurred_at")
+    out = out.with_columns(
+        confounded=pl.Series(ledger.derive_confounded(out)) | pl.col("confounded")
+    )
     problems = ledger.validate(out)
     if problems:
         raise SystemExit("\n".join(problems))

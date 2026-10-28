@@ -30,6 +30,8 @@ TIMESTAMP_SOURCES = ("edgar_acceptance", "press_release", "regulator", "media")
 # exact: occurred_at is when the news reached the market. upper_bound: occurred_at is only a time
 # by which it had (an SEC filing after the company's own release); stated_date is the release date.
 TIMINGS = ("exact", "upper_bound")
+# amendment 3: only these types have a surprise rule
+SURPRISE_TYPES = ("trial_readout", "earnings_guidance")
 # exchange -> (time zone, regular-session close)
 EXCHANGES = {
     "NYSE": ("America/New_York", time(16, 0)),
@@ -103,6 +105,8 @@ def day0(occurred_at: datetime, exchange: str, calendar: list[date]) -> date:
     reaches the next trading day's. ``calendar`` is the sorted list of trading dates.
     """
     zone, close = EXCHANGES[exchange]
+    if occurred_at.tzinfo is None:
+        raise ValueError("occurred_at must be timezone-aware")
     local = occurred_at.astimezone(ZoneInfo(zone))
     day = local.date()
     i = bisect_right(calendar, day)  # index of the first trading day after `day`
@@ -134,13 +138,41 @@ def day0_window(
         raise ValueError("an upper_bound event needs stated_date")
     zone, close = EXCHANGES[exchange]
     local = occurred_at.astimezone(ZoneInfo(zone))
-    first = calendar[bisect_left(calendar, stated_date)]  # stated_date, or the next trading day
+    k = bisect_left(calendar, stated_date)
+    if k >= len(calendar):
+        raise ValueError(f"no trading day on or after {stated_date} in the calendar")
+    first = calendar[k]  # stated_date, or the next trading day
     if local.date() == stated_date and local.time() < close:
         return first, first
     i = bisect_right(calendar, first)
     if i >= len(calendar):
         raise ValueError(f"no trading day after {first} in the calendar")
     return first, calendar[i]
+
+
+def derive_confounded(df: pl.DataFrame) -> list[bool]:
+    """True where another event within a day shares an exposed ticker (its own or a read-through).
+
+    Two events overlap when their stated dates are at most one calendar day apart and the issuer of
+    one is the issuer or a read-through ticker of the other. Hand flags are kept on top of this.
+    """
+    exposed = [
+        {r["ticker"], *(r["also_affects"] or "").split(";")} - {""}
+        for r in df.iter_rows(named=True)
+    ]
+    days = [r["stated_date"] or r["occurred_at"].date() for r in df.iter_rows(named=True)]
+    tickers = df["ticker"].to_list()
+    flags = []
+    for i in range(len(tickers)):
+        flags.append(
+            any(
+                j != i
+                and abs((days[i] - days[j]).days) <= 1
+                and (tickers[i] in exposed[j] or tickers[j] in exposed[i])
+                for j in range(len(tickers))
+            )
+        )
+    return flags
 
 
 def validate(df: pl.DataFrame) -> list[str]:
@@ -159,6 +191,12 @@ def validate(df: pl.DataFrame) -> list[str]:
 
         if row["event_type"] not in TAXONOMY:
             bad(f"event_type {row['event_type']!r} not in the taxonomy")
+        if not eid.startswith(f"{row['ticker']}-"):
+            bad("event_id does not start with its ticker")
+        elif row["stated_date"] is not None and f"-{row['stated_date']:%Y%m%d}-" not in eid:
+            bad("event_id date differs from stated_date")
+        if row["surprise"] is not None and row["event_type"] not in SURPRISE_TYPES:
+            bad(f"{row['event_type']} events carry no surprise rule")
         if row["timing"] not in TIMINGS:
             bad(f"timing {row['timing']!r} not allowed")
         if row["timing"] == "upper_bound":

@@ -100,15 +100,20 @@ def test_french_parser_finds_table_and_converts_percent_to_decimal():
 def test_warehouse_build_creates_tables_and_eligibility_view(tmp_path):
     paths = Paths(root=tmp_path, data=tmp_path).ensure()
     days = [(2024, 1, 2), (2024, 1, 3)]
-    for ticker in ("SPY", "HIMS"):
+    shell = [(2020, 6, 1)]  # HIMS before the 2021 de-SPAC is the shell company
+    for ticker, rows in (("SPY", days), ("HIMS", shell + days)):
         f = yahoo.raw_path(paths, ticker)
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps(payload([10.0, 11.0], days)), encoding="utf-8")
+        f.write_text(json.dumps(payload([10.0] * len(rows), rows)), encoding="utf-8")
     counts = warehouse.build(paths)
-    assert counts["prices"] == 4
+    assert counts["prices"] == 5
     assert counts["securities"] > 20
     con = warehouse.connect(paths)
-    # HIMS is only eligible from its real listing date (2021), so its 2024 bars are kept.
+    # HIMS is only eligible from its real listing date (2021): the shell bar is dropped.
     assert con.sql("select count(*) from eligible_prices").fetchall()[0][0] == 4
+    assert (
+        con.sql("select count(*) from eligible_prices where date < '2021-01-01'").fetchall()[0][0]
+        == 0
+    )
     downloaded = pl.from_arrow(con.sql("select ticker from securities where downloaded").arrow())
     assert set(downloaded["ticker"]) == {"SPY", "HIMS"}
