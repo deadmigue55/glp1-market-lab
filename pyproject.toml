@@ -15,6 +15,7 @@ dependencies = [
     "polars>=2.0.0",
     "pyarrow>=26.0.0",
     "python-dotenv>=1.2.4",
+    "scipy>=1.18.1",
 ]
 
 [project.scripts]
