@@ -46,6 +46,8 @@ def row(**kw):
         "event_type": "trial_readout",
         "title": "x",
         "occurred_at": utc(2024, 1, 10, 12, 0),
+        "timing": "exact",
+        "stated_date": None,
         "timestamp_source": "press_release",
         "source_url": "https://example.com/a",
         "scheduled": False,
@@ -79,6 +81,9 @@ def test_validate_flags_each_kind_of_defect():
             row(event_id="f", occurred_at=utc(2010, 1, 1)),
             row(event_id="g", scheduled=True, announced_on=date(2025, 1, 1)),
             row(event_id="g"),
+            row(event_id="h", timing="upper_bound"),
+            row(event_id="i", timing="rumoured"),
+            row(event_id="j", timing="upper_bound", stated_date=date(2024, 1, 11)),
         )
     )
     text = "\n".join(problems)
@@ -91,5 +96,35 @@ def test_validate_flags_each_kind_of_defect():
         "f: occurred_at",
         "g: announced_on is after",
         "duplicate event_id",
+        "h: an upper_bound",
+        "i: timing",
+        "j: stated_date is after",
     ):
         assert needle in text, needle
+
+
+def window(occurred_at, stated, exchange="CPH"):
+    return ledger.day0_window(occurred_at, "upper_bound", stated, exchange, CAL)
+
+
+def test_upper_bound_filed_before_the_close_on_its_stated_day_is_certain():
+    # filed 14:00 Copenhagen on Wed 10th: the release was earlier, so day 0 is the 10th
+    assert window(utc(2024, 1, 10, 13, 0), date(2024, 1, 10)) == (date(2024, 1, 10),) * 2
+
+
+def test_upper_bound_filed_after_the_close_or_later_is_a_two_day_window():
+    after_close = window(utc(2024, 1, 10, 17, 0), date(2024, 1, 10))
+    next_day = window(utc(2024, 1, 11, 9, 0), date(2024, 1, 10))
+    assert after_close == next_day == (date(2024, 1, 10), date(2024, 1, 11))
+
+
+def test_upper_bound_on_a_non_trading_stated_day_starts_at_the_next_trading_day():
+    # Sat 13th released, filed Tue 16th: first trading day is the 16th; the window runs to the end
+    assert ledger.day0_window(
+        utc(2024, 1, 16, 9, 0), "upper_bound", date(2024, 1, 13), "CPH", [*CAL, date(2024, 1, 17)]
+    ) == (date(2024, 1, 16), date(2024, 1, 17))
+
+
+def test_exact_events_keep_a_single_day_0():
+    d = date(2024, 1, 11)
+    assert ledger.day0_window(utc(2024, 1, 10, 22, 0), "exact", None, "NYSE", CAL) == (d, d)

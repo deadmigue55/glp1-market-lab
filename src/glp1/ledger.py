@@ -8,7 +8,7 @@ by ``glp1 ledger`` so a malformed row cannot reach a result.
 
 from __future__ import annotations
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from datetime import UTC, date, datetime, time
 from zoneinfo import ZoneInfo
 
@@ -27,6 +27,9 @@ TAXONOMY = (
     "mna_licensing",
 )
 TIMESTAMP_SOURCES = ("edgar_acceptance", "press_release", "regulator", "media")
+# exact: occurred_at is when the news reached the market. upper_bound: occurred_at is only a time
+# by which it had (an SEC filing after the company's own release); stated_date is the release date.
+TIMINGS = ("exact", "upper_bound")
 # exchange -> (time zone, regular-session close)
 EXCHANGES = {
     "NYSE": ("America/New_York", time(16, 0)),
@@ -41,6 +44,8 @@ SCHEMA = {
     "event_type": pl.String,
     "title": pl.String,
     "occurred_at": pl.Datetime("us", "UTC"),
+    "timing": pl.String,
+    "stated_date": pl.Date,
     "timestamp_source": pl.String,
     "source_url": pl.String,
     "scheduled": pl.Boolean,
@@ -83,6 +88,35 @@ def day0(occurred_at: datetime, exchange: str, calendar: list[date]) -> date:
     return calendar[i]
 
 
+def day0_window(
+    occurred_at: datetime,
+    timing: str,
+    stated_date: date | None,
+    exchange: str,
+    calendar: list[date],
+) -> tuple[date, date]:
+    """First and last trading day on which the news could have first been priced.
+
+    An ``exact`` event has one day 0. An ``upper_bound`` event is certain only when it was filed on
+    its stated date before the close (the release came earlier still); otherwise the release time
+    on ``stated_date`` is unknown, so day 0 is that day or the next, and the study uses [0, +1].
+    """
+    if timing == "exact":
+        d = day0(occurred_at, exchange, calendar)
+        return d, d
+    if stated_date is None:
+        raise ValueError("an upper_bound event needs stated_date")
+    zone, close = EXCHANGES[exchange]
+    local = occurred_at.astimezone(ZoneInfo(zone))
+    first = calendar[bisect_left(calendar, stated_date)]  # stated_date, or the next trading day
+    if local.date() == stated_date and local.time() < close:
+        return first, first
+    i = bisect_right(calendar, first)
+    if i >= len(calendar):
+        raise ValueError(f"no trading day after {first} in the calendar")
+    return first, calendar[i]
+
+
 def validate(df: pl.DataFrame) -> list[str]:
     """Return a list of problems; an empty list means the ledger is well formed."""
     problems: list[str] = []
@@ -99,6 +133,16 @@ def validate(df: pl.DataFrame) -> list[str]:
 
         if row["event_type"] not in TAXONOMY:
             bad(f"event_type {row['event_type']!r} not in the taxonomy")
+        if row["timing"] not in TIMINGS:
+            bad(f"timing {row['timing']!r} not allowed")
+        if row["timing"] == "upper_bound":
+            if row["stated_date"] is None:
+                bad("an upper_bound event needs stated_date")
+            elif (
+                row["occurred_at"] is not None
+                and row["stated_date"] > row["occurred_at"].astimezone(UTC).date()
+            ):
+                bad("stated_date is after occurred_at")
         if row["timestamp_source"] not in TIMESTAMP_SOURCES:
             bad(f"timestamp_source {row['timestamp_source']!r} not allowed")
         if row["occurred_at"] is None:

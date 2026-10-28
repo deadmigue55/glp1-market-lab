@@ -51,6 +51,7 @@ select = [
 "src/glp1/checks.py" = ["E501"]  # SQL strings and messages read better on long lines
 "src/glp1/warehouse.py" = ["E501"]
 "src/glp1/doctor.py" = ["E501"]  # source URLs
+"scripts/**" = ["E501"]  # curated ledger specs read better one event per line
 
 # ── Tests ──
 [tool.pytest.ini_options]

@@ -45,3 +45,23 @@ def test_lead_text_strips_markup_scripts_and_entities():
     markup = "<html><script>var x=1;</script><body><p>Lilly&nbsp;reports</p><p>results</p></body>"
     assert edgar.lead_text(markup) == "Lilly reports results"
     assert len(edgar.lead_text("<p>" + "word " * 2000 + "</p>", limit=50)) == 50
+
+
+def test_skip_cover_drops_the_6k_cover_page_only_when_present():
+    cover = "FORM 6-K NOVO NORDISK A/S Form 20-F [X] Form 40-F [ ] Semaglutide cuts MACE by 20%"
+    assert edgar.skip_cover(cover) == "Semaglutide cuts MACE by 20%"
+    assert edgar.skip_cover("Lilly reports results") == "Lilly reports results"
+
+
+def test_skip_cover_handles_the_older_12g3_2b_cover():
+    old = (
+        "Form 20-F [X] Form 40-F [ ] Indicate by check mark ... Yes [ ] No [X] "
+        "If “Yes” is marked, indicate below the file number: Rule 12g-32(b):82-________ "
+        "Fiasp approved in Europe"
+    )
+    assert edgar.skip_cover(old) == "Fiasp approved in Europe"
+
+
+def test_skip_cover_handles_unicode_check_boxes():
+    new = "Form 20-F \u2612 Form 40-F \u2610 Wegovy approved in the US for MASH"
+    assert edgar.skip_cover(new) == "Wegovy approved in the US for MASH"

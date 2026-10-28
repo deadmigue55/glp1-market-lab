@@ -73,9 +73,18 @@ class TextExtractor:
         return re.sub(r"\s+", " ", html.unescape(" ".join(self.parts))).strip()
 
 
+_COVER_END = re.compile(r"Form 40-F\s*(?:\[\s*[Xx]?\s*\]|[☐☒])|Rule 12g-?32\(b\):\s*82-[_\d]*")
+
+
+def skip_cover(text: str) -> str:
+    """Drop a 6-K's SEC cover page, which ends with the 20-F / 40-F check boxes."""
+    ends = [m.end() for m in _COVER_END.finditer(text[:2000])]
+    return text[max(ends) :].strip() if ends else text
+
+
 def lead_text(markup: str, limit: int = LEAD_CHARS) -> str:
-    """The first ``limit`` characters of a document's visible text."""
-    return TextExtractor().text(markup)[:limit]
+    """The first ``limit`` characters of a document's visible text, past any 6-K cover page."""
+    return skip_cover(TextExtractor().text(markup))[:limit]
 
 
 def parse_submissions(cik: int, payloads: list[dict]) -> pl.DataFrame:
