@@ -147,7 +147,12 @@ def cell_test(
     shrink = np.sqrt(max(1 - rbar, 1e-9) / (1 + (n - 1) * max(rbar, 0.0)))
     t_kp = t_bmp * shrink
     df = n - 1
+    # Size of the move whatever its sign: E|N(0,1)| = sqrt(2/pi) if the news moved nothing
+    abs_scar = np.abs(scar)
+    t_abs = (abs_scar.mean() - np.sqrt(2 / np.pi)) / (abs_scar.std(ddof=1) / np.sqrt(n))
     return out | {
+        "mean_abs_scar": float(abs_scar.mean()),
+        "p_abs": float(2 * stats.t.sf(abs(t_abs), df)),
         "t_plain": float(t_plain),
         "p_plain": float(2 * stats.t.sf(abs(t_plain), df)),
         "t_bmp": float(t_bmp),
