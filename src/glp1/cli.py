@@ -134,6 +134,17 @@ def cmd_donors(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ecosystem(_: argparse.Namespace) -> int:
+    """Run SDID, the GLP-1 factor and betas, and TVP-VAR connectedness (about 10 minutes)."""
+    from glp1 import connectedness, ecosystem, factor
+
+    paths = get_paths()
+    print(f"sdid: {len(ecosystem.run(paths)['estimates'])} estimates")
+    print(f"factor: {factor.run(paths)['n_betas']} betas")
+    print(f"connectedness: {connectedness.run(paths)['n_days']} days")
+    return 0
+
+
 def cmd_study(_: argparse.Namespace) -> int:
     """Run the event study and jump-size model; writes the files under results/."""
     from glp1 import study
@@ -172,6 +183,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("donors", help="download S&P 500 prices (donor pool for SDID and betas)")
     p.set_defaults(func=cmd_donors)
+
+    p = sub.add_parser("ecosystem", help="run SDID, the GLP-1 factor and TVP-VAR connectedness")
+    p.set_defaults(func=cmd_ecosystem)
 
     p = sub.add_parser("study", help="run the event study and the jump-size model")
     p.set_defaults(func=cmd_study)
