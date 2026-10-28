@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -24,6 +25,9 @@ def find_project_root(start: Path | None = None) -> Path:
 
 
 PROJECT_ROOT = find_project_root()
+# Last price date the analysis may use (methodology amendment 5). Later bars are cut when the
+# warehouse is built; the 2026-10-28 session was still open when the data were fetched.
+FREEZE_DATE = date(2026, 10, 27)
 load_dotenv(PROJECT_ROOT / ".env")
 
 

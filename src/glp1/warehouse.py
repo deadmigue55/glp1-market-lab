@@ -9,7 +9,7 @@ from __future__ import annotations
 import duckdb
 import polars as pl
 
-from glp1.config import Paths
+from glp1.config import FREEZE_DATE, Paths
 from glp1.ingest import french, yahoo
 from glp1.universe import UNIVERSE
 
@@ -23,6 +23,8 @@ def build(paths: Paths) -> dict[str, int]:
         if parsed is None:
             continue
         p, a = parsed
+        p = p.filter(pl.col("date") <= FREEZE_DATE)
+        a = a.filter(pl.col("date") <= FREEZE_DATE)
         prices.append(p)
         actions.append(a)
         present.append(sec.ticker)
