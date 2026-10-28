@@ -51,6 +51,49 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_edgar(args: argparse.Namespace) -> int:
+    """List 8-K/6-K filings for the given companies and, unless --no-text, fetch their headlines."""
+    import polars as pl
+
+    from glp1.ingest import edgar
+
+    paths = get_paths().ensure()
+    client = edgar.EdgarClient(paths)
+    frames = []
+    try:
+        for cik in args.cik:
+            df = edgar.filings(client, cik).filter(pl.col("filing_date") >= pl.date(2017, 1, 1))
+            print(f"  CIK {cik}: {df.height} filings (8-K/6-K) since 2017")
+            if not args.no_text:
+                leads = []
+                for i, row in enumerate(df.iter_rows(named=True), 1):
+                    leads.append(edgar.headline(client, cik, row["accession"], row["primary_doc"]))
+                    if i % 100 == 0:
+                        print(f"    {i}/{df.height}")
+                df = df.with_columns(pl.Series("lead", leads))
+            frames.append(df)
+    finally:
+        client.close()
+    out = paths.processed / "edgar_filings.parquet"
+    pl.concat(frames, how="diagonal").write_parquet(out)
+    print(f"wrote {out}")
+    return 0
+
+
+def cmd_ledger(_: argparse.Namespace) -> int:
+    """Validate the catalyst ledger and summarise it; exit 1 when any row is malformed."""
+    from glp1 import ledger
+
+    df = ledger.load(get_paths())
+    problems = ledger.validate(df)
+    for p in problems:
+        print(f"  problem  {p}")
+    by_type = df.group_by("event_type").len().sort("event_type")
+    print(f"{df.height} events; by type: {dict(by_type.iter_rows())}")
+    print(f"{len(problems)} problems" if problems else "Ledger is well formed.")
+    return 1 if problems else 0
+
+
 def cmd_build(_: argparse.Namespace) -> int:
     """Rebuild the warehouse from the raw cache without touching the network."""
     from glp1 import warehouse
@@ -85,6 +128,14 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("ingest", help="download prices and factors, then build the warehouse")
     p.add_argument("--end", help="last day to request, YYYY-MM-DD (default: today)")
     p.set_defaults(func=cmd_ingest)
+
+    p = sub.add_parser("edgar", help="list a company's 8-K/6-K filings and fetch their headlines")
+    p.add_argument("--cik", type=int, action="append", required=True, help="SEC CIK, repeatable")
+    p.add_argument("--no-text", action="store_true", help="list filings only, fetch no documents")
+    p.set_defaults(func=cmd_edgar)
+
+    p = sub.add_parser("ledger", help="validate the catalyst ledger")
+    p.set_defaults(func=cmd_ledger)
 
     p = sub.add_parser("build", help="rebuild the warehouse from the raw cache (no network)")
     p.set_defaults(func=cmd_build)
