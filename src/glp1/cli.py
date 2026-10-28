@@ -145,6 +145,17 @@ def cmd_ecosystem(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_valuation(_: argparse.Namespace) -> int:
+    """Fetch SEC fundamentals, then run the Lilly reverse DCF and the news-day attribution."""
+    from glp1 import fundamentals, valuation
+
+    paths = get_paths()
+    print(f"fundamentals: {fundamentals.build(paths).height} quarters")
+    latest = valuation.run(paths)["latest"]
+    print(f"implied peak sales (median) ${latest['peak_c']['median']:.0f}bn on {latest['date']}")
+    return 0
+
+
 def cmd_study(_: argparse.Namespace) -> int:
     """Run the event study and jump-size model; writes the files under results/."""
     from glp1 import study
@@ -186,6 +197,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("ecosystem", help="run SDID, the GLP-1 factor and TVP-VAR connectedness")
     p.set_defaults(func=cmd_ecosystem)
+
+    p = sub.add_parser("valuation", help="run the Lilly reverse DCF from SEC fundamentals")
+    p.set_defaults(func=cmd_valuation)
 
     p = sub.add_parser("study", help="run the event study and the jump-size model")
     p.set_defaults(func=cmd_study)
