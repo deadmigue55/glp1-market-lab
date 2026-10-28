@@ -14,7 +14,7 @@ import numpy as np
 import polars as pl
 
 from glp1 import eventstudy as es
-from glp1 import ledger, warehouse
+from glp1 import jumps, ledger, warehouse
 from glp1.config import FREEZE_DATE, Paths
 
 LISTINGS = {"NVO": ["NVO", "NOVO-B.CO"]}  # one issuer, two listings
@@ -260,6 +260,7 @@ def run(paths: Paths) -> dict:
     res = paths.root / "results"
     res.mkdir(exist_ok=True)
     df.write_csv(res / "event_cars.csv")
+    out["jump_model"] = jumps.summarize(res / "event_cars.csv")
     (res / "eventstudy.json").write_text(json.dumps(out, indent=1, default=str), encoding="utf-8")
     return out
 
@@ -268,5 +269,11 @@ if __name__ == "__main__":
     from glp1.config import get_paths
 
     r = run(get_paths())
-    print({k: v for k, v in r.items() if k not in ("cells", "bh", "surprise_regressions")})
+    print(
+        {
+            k: v
+            for k, v in r.items()
+            if k not in ("cells", "bh", "surprise_regressions", "jump_model")
+        }
+    )
     print(date.today())

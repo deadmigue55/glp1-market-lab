@@ -116,3 +116,17 @@ def test_wild_bootstrap_detects_a_shifted_mean_and_not_a_zero_mean():
     rng = np.random.default_rng(6)
     assert es.wild_bootstrap_p(rng.normal(0.5, 1, 40), reps=2000) < 0.01
     assert es.wild_bootstrap_p(rng.normal(0, 1, 40), reps=2000) > 0.05
+
+
+def test_jump_model_recovers_planted_group_spreads():
+    from glp1 import jumps
+
+    rng = np.random.default_rng(8)
+    true_tau = np.array([0.03, 0.08, 0.15])
+    idx = np.repeat([0, 1, 2], [25, 25, 12])
+    sd = rng.uniform(0.01, 0.03, len(idx))
+    car = rng.normal(0, np.sqrt(sd**2 + true_tau[idx] ** 2))
+    idata = jumps.fit_pymc(car, sd, idx, 3, draws=500)
+    tau = idata.posterior["tau"].values.reshape(-1, 3)
+    lo, hi = np.quantile(tau, [0.02, 0.98], axis=0)
+    assert ((lo <= true_tau) & (true_tau <= hi)).all()

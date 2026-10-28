@@ -123,6 +123,19 @@ def cmd_check(_: argparse.Namespace) -> int:
     return 1 if errors else 0
 
 
+def cmd_study(_: argparse.Namespace) -> int:
+    """Run the event study and jump-size model; writes the files under results/."""
+    from glp1 import study
+
+    out = study.run(get_paths())
+    print(
+        f"{out['events']} events, {out['pairs']} primary pairs ({out['fallback_pairs']} fallback)"
+    )
+    jm = out["jump_model"]
+    print(f"jump model: {jm['n_events']} events, {jm['divergences']} divergences")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse arguments and run the chosen command."""
     parser = argparse.ArgumentParser(prog="glp1", description=__doc__)
@@ -145,6 +158,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("ledger", help="validate the catalyst ledger")
     p.set_defaults(func=cmd_ledger)
+
+    p = sub.add_parser("study", help="run the event study and the jump-size model")
+    p.set_defaults(func=cmd_study)
 
     p = sub.add_parser("build", help="rebuild the warehouse from the raw cache (no network)")
     p.set_defaults(func=cmd_build)
