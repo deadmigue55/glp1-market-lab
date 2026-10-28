@@ -19,7 +19,7 @@ from glp1.config import Paths
 from glp1.ingest import sic
 
 PANEL_START = date(2018, 6, 1)  # INSP lists in May 2018
-PLACEBO_REPS = 50
+PLACEBO_REPS = 100
 HORIZONS = (4, 13, 26, 52)  # post-shock weeks
 SHOCKS = {  # ledger event_id -> day 0
     "NVO-20230808-select": date(2023, 8, 8),
@@ -42,7 +42,14 @@ GROUPS = {
     "medtech_health": ["DXCM", "PODD", "RMD", "INSP", "DVA", "ISRG", "ZBH"],
     "food_drink": ["MDLZ", "HSY", "PEP", "CAG"],
 }
-NOT_DONORS = {"LLY", "NVO", "AMGN", "PFE", "VKTX", "HIMS", "TMO", "WST", "WW", "SPY"}
+# GLP-1 names, plus peers the SIC screen misses (wholesalers, CROs, life-science tools, grocery
+# retail, household staples, cruise lines, health REITs); added after the step 4 review
+NOT_DONORS = {
+    "LLY", "NVO", "AMGN", "PFE", "HIMS", "TMO", "WST", "WW", "SPY",
+    "CAH", "COR", "MCK", "HSIC", "CRL", "IQV", "INCY", "A", "MTD", "WAT", "ILMN", "RVTY",
+    "WMT", "TGT", "COST", "DG", "DLTR", "CASY", "PG", "CL", "CLX", "KMB", "CHD", "EL", "KVUE",
+    "CCL", "RCL", "NCLH", "WELL", "VTR", "DOC",
+}  # fmt: skip
 
 
 def weekly_log_prices(paths: Paths, con) -> pl.DataFrame:
@@ -86,8 +93,17 @@ def run_shock(wide: pl.DataFrame, donors: list[str], treated: list[str], day0: d
     tr = y[n0:].mean(axis=0)
     spy = both["SPY"].to_numpy()
     base = (tr[t0:].mean() - tr[:t0].mean()) - (spy[t0:].mean() - spy[:t0].mean())
+    # the estimate is a window average; also report the gap in the last post week and the answer
+    # with uniform time weights (the fitted weights sit on very few pre-weeks)
+    w_unit = np.concatenate([-fit.omega, np.full(len(treated), 1 / len(treated))])
+    gap = y.T @ w_unit  # treated minus synthetic, every week
+    end_gap = float(gap[-1] - fit.lam @ gap[:t0])
+    uniform = float(gap[t0:].mean() - gap[:t0].mean())
     return {
         "att": fit.att,
+        "end_gap": end_gap,
+        "att_uniform_time": uniform,
+        "lambda_max": float(fit.lam.max()),
         "se": se,
         "baseline_did_vs_spy": float(base),
         "n_donors": n0,
@@ -95,6 +111,18 @@ def run_shock(wide: pl.DataFrame, donors: list[str], treated: list[str], day0: d
         "t_post": h,
         "effective_donors": float(1 / np.sum(fit.omega**2)),
     }
+
+
+def in_time_placebo_sd(wide, donors, treated, h, step=8, first=100, last_day=date(2022, 1, 31)):
+    """Spread of SDID effects at fake shock dates before any real shock (same units and horizon)."""
+    weeks = wide["week"].to_list()
+    est = []
+    for i in range(first, len(weeks) - h, step):
+        if weeks[i] > last_day:
+            break
+        y = wide.slice(0, i + h).select(donors + treated).to_numpy().T
+        est.append(sdid.estimate(y, len(donors), i).att)
+    return float(np.std(est, ddof=1)), len(est)
 
 
 def run(paths: Paths) -> dict:
@@ -110,6 +138,7 @@ def run(paths: Paths) -> dict:
             for h in HORIZONS:
                 r = run_shock(wide, donors, tr, day0, h)
                 if r:
+                    r["se_in_time"], r["n_in_time"] = in_time_placebo_sd(wide, donors, tr, h)
                     out.append(
                         {
                             "event_id": event_id,

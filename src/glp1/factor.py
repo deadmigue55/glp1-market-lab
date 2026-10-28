@@ -96,6 +96,29 @@ def pca_check(ret: pl.DataFrame) -> float:
     return float(abs(np.corrcoef(pc1, f["glp1"].to_numpy())[0, 1]))
 
 
+def pca_detail(ret: pl.DataFrame) -> dict:
+    """Which principal component of the 13 names' FF6 residuals matches the factor, and how related
+    the makers' and losers' residuals are (the direct evidence for or against a common axis)."""
+    names = [t for t in MAKERS + LOSERS if t in set(ret["ticker"].unique())]
+    wide = ret.pivot(on="ticker", index="date", values="ex").select("date", *names).drop_nulls()
+    d = wide.join(ret.select("date", *FF).unique("date"), on="date").sort("date")
+    x = np.column_stack([np.ones(d.height)] + [d[c].to_numpy() for c in FF])
+    res = np.column_stack(
+        [d[c].to_numpy() - x @ np.linalg.lstsq(x, d[c].to_numpy(), rcond=None)[0] for c in names]
+    )
+    mk = res[:, [names.index(m) for m in MAKERS]].mean(axis=1)
+    lo = res[:, [names.index(n) for n in LOSERS if n in names]].mean(axis=1)
+    z = (res - res.mean(0)) / res.std(0)
+    u, s, _ = np.linalg.svd(z, full_matrices=False)
+    f = build_factor(ret).join(d.select("date"), on="date", how="inner").sort("date")["glp1"]
+    corr = [abs(float(np.corrcoef(u[:, i] * s[i], f.to_numpy())[0, 1])) for i in range(4)]
+    return {
+        "maker_loser_resid_corr": float(np.corrcoef(mk, lo)[0, 1]),
+        "pc_abs_corr_first4": corr,
+        "best_pc": int(np.argmax(corr)) + 1,
+    }
+
+
 def run(paths: Paths) -> dict:
     from glp1 import warehouse
 
@@ -120,6 +143,7 @@ def run(paths: Paths) -> dict:
         "factor_mean_daily": float(fac["raw"].mean()),
         "factor_sd_daily": float(fac["raw"].std()),
         "pca_abs_corr": pca_check(ret),
+        "pca": pca_detail(ret),
         "n_betas": len(pool),
         "spearman_ab": float(rho.statistic),
         "spearman_p": float(rho.pvalue),
