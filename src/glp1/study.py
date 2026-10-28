@@ -112,7 +112,8 @@ def event_table(panel: Panel, led: pl.DataFrame) -> tuple[pl.DataFrame, dict]:
             rows = analyse_pair(panel, ev, sec)
             if rows is None:
                 continue
-            have_ff = any(r["model"] == "ff6" for r in rows)
+            # amendment 1: the market model stands in only when the factor model has no [-1,+1]
+            have_ff = any(r["model"] == "ff6" and np.isfinite(r["car_m1p1"]) for r in rows)
             for r in rows:
                 key = (ev["event_id"], sec, r["model"])
                 resids[key] = r.pop("_resid")
@@ -198,7 +199,10 @@ def surprise_regressions(df: pl.DataFrame) -> list[dict]:
         for kind, sec, sub in groups:
             if sub.height < 6:
                 continue
-            slope, se, n = hc3_slope(sub["surprise"].to_numpy(), sub["car_m1p1"].to_numpy())
+            x, y = sub["surprise"].to_numpy(), sub["car_m1p1"].to_numpy()
+            slope, se, n = hc3_slope(x, y)
+            rng = np.random.default_rng(0)
+            perm = np.array([np.polyfit(rng.permutation(x), y, 1)[0] for _ in range(4999)])
             out.append(
                 {
                     "sample": sample,
@@ -208,6 +212,7 @@ def surprise_regressions(df: pl.DataFrame) -> list[dict]:
                     "slope": slope,
                     "se_hc3": se,
                     "t": slope / se if se > 0 else float("nan"),
+                    "p_perm": float((1 + np.sum(np.abs(perm) >= abs(slope))) / 5000),
                 }
             )
     return out
@@ -247,6 +252,12 @@ def run(paths: Paths) -> dict:
         }
         for r, x in zip(fam.iter_rows(named=True), reject, strict=True)
     ]
+    absf = cells_df.filter((pl.col("window") == es.PRIMARY) & (pl.col("n") >= MIN_CELL))
+    rej_abs = es.benjamini_hochberg(absf["p_abs"].to_numpy(), 0.10)
+    bh_abs = [
+        {k: r[k] for k in ("event_type", "security", "role", "sample")} | {"reject_bh10": bool(x)}
+        for r, x in zip(absf.iter_rows(named=True), rej_abs, strict=True)
+    ]
     out = {
         "freeze_date": FREEZE_DATE.isoformat(),
         "events": led.height,
@@ -255,6 +266,7 @@ def run(paths: Paths) -> dict:
         "cells_tested_for_bh": fam.height,
         "cells": cells,
         "bh": bh,
+        "bh_abs": bh_abs,
         "surprise_regressions": surprise_regressions(df),
     }
     res = paths.root / "results"
@@ -273,7 +285,7 @@ if __name__ == "__main__":
         {
             k: v
             for k, v in r.items()
-            if k not in ("cells", "bh", "surprise_regressions", "jump_model")
+            if k not in ("cells", "bh", "bh_abs", "surprise_regressions", "jump_model")
         }
     )
     print(date.today())

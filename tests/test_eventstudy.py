@@ -96,7 +96,9 @@ def test_fit_event_refuses_thin_or_missing_data():
     assert es.fit_event(y, X, 100, 120) is None  # estimation window starts before the data
     y2 = y.copy()
     y2[601] = np.nan
-    assert es.fit_event(y2, X, 600, 620) is None  # a missing day inside the event window
+    fit = es.fit_event(y2, X, 600, 620)  # a missing day voids only the windows containing it
+    assert np.isnan(fit.car(599, 601)[0])
+    assert np.isfinite(fit.car(602, 620)[0]) and np.isfinite(fit.car(599, 600)[0])
 
 
 def test_window_bounds_cover_both_candidate_days_for_ambiguous_events():

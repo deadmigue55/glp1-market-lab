@@ -40,7 +40,7 @@ class EventFit:
         """Cumulative abnormal return, standard deviation and day count over positions lo..hi."""
         sel = (self.positions >= lo) & (self.positions <= hi)
         n = int(sel.sum())
-        if n == 0:
+        if n == 0 or not np.isfinite(self.ar[sel]).all():  # a missing day voids only this window
             return float("nan"), float("nan"), 0
         x = self._x_event[sel]
         s = x.sum(axis=0)
@@ -56,7 +56,8 @@ def fit_event(
     ``y`` is the security's (excess) return and ``x`` the regressor matrix with a constant column,
     both indexed by the security's trading days. ``first`` is the position of the first candidate
     day 0 and ``event_hi`` the last position needed. Returns None when the estimation window has too
-    few clean observations or the event window has missing data.
+    few clean observations. Days with missing data inside the event span give NaN abnormal returns,
+    which void only the windows that contain them.
     """
     est = np.arange(first + EST_START, first + EST_END + 1)
     if est[0] < 0 or event_hi >= len(y):
@@ -77,11 +78,8 @@ def fit_event(
     if pos[0] < 0:
         return None
     yp, xp = y[pos], x[pos]
-    good = np.isfinite(yp) & np.isfinite(xp).all(axis=1)
-    if not good.all():
-        return None
-    ar = yp - xp @ beta
-    return EventFit(ar, pos, sigma, int(ok.sum()), resid, xtx_inv, xp)
+    ar = yp - xp @ beta  # NaN wherever the return or a factor is missing
+    return EventFit(ar, pos, sigma, int(ok.sum()), resid, xtx_inv, np.nan_to_num(xp))
 
 
 def window_bounds(first: int, last: int, name: str) -> tuple[int, int]:

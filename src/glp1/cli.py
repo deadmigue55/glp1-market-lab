@@ -123,6 +123,17 @@ def cmd_check(_: argparse.Namespace) -> int:
     return 1 if errors else 0
 
 
+def cmd_donors(_: argparse.Namespace) -> int:
+    """Download the S&P 500 donor pool (cached) and write data/processed/donors.parquet."""
+    from datetime import date
+
+    from glp1.ingest import donors
+
+    out = donors.fetch_all(get_paths().ensure(), date.today())
+    print(f"{out['ticker'].n_unique()} tickers, {out.height} rows")
+    return 0
+
+
 def cmd_study(_: argparse.Namespace) -> int:
     """Run the event study and jump-size model; writes the files under results/."""
     from glp1 import study
@@ -131,8 +142,8 @@ def cmd_study(_: argparse.Namespace) -> int:
     print(
         f"{out['events']} events, {out['pairs']} primary pairs ({out['fallback_pairs']} fallback)"
     )
-    jm = out["jump_model"]
-    print(f"jump model: {jm['n_events']} events, {jm['divergences']} divergences")
+    for name, jm in out["jump_model"].items():
+        print(f"jump model {name}: {jm['n_events']} events, {jm['divergences']} divergences")
     return 0
 
 
@@ -158,6 +169,9 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("ledger", help="validate the catalyst ledger")
     p.set_defaults(func=cmd_ledger)
+
+    p = sub.add_parser("donors", help="download S&P 500 prices (donor pool for SDID and betas)")
+    p.set_defaults(func=cmd_donors)
 
     p = sub.add_parser("study", help="run the event study and the jump-size model")
     p.set_defaults(func=cmd_study)

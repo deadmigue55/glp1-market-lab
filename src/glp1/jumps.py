@@ -16,19 +16,25 @@ import polars as pl
 KINDS = ("earnings_guidance", "trial_readout")
 
 
-def load_events(path) -> pl.DataFrame:
-    """One row per event: the issuer's own primary listing (NVO is read from NVO, not NOVO-B.CO)."""
+def load_events(path, clean_only: bool = False) -> pl.DataFrame:
+    """One row per (issuer, day 0) for Lilly and Novo, on the issuer's primary US listing.
+
+    NVO is read from NVO, not NOVO-B.CO. When an earnings release and a trial readout fall on the
+    same day (Lilly 2022-04-28, 2025-08-07) the day is one observation and counts as a readout.
+    """
     d = pl.read_csv(path).filter(
         pl.col("primary")
         & (pl.col("role") == "own")
-        & (pl.col("security") != "NOVO-B.CO")
+        & pl.col("security").is_in(["LLY", "NVO"])
         & pl.col("event_type").is_in(KINDS)
         & pl.col("car_m1p1").is_not_nan()
     )
-    company = pl.when(pl.col("security").is_in(["LLY", "NVO"])).then(pl.col("security"))
-    return d.with_columns(
-        group=pl.col("event_type") + "|" + company.otherwise(pl.lit("OTH"))
-    ).select("event_id", "group", "car_m1p1", "sd_m1p1", "confounded")
+    if clean_only:
+        d = d.filter(~pl.col("confounded"))
+    d = d.sort("event_type", descending=True).unique(["security", "first_day0"], keep="first")
+    return d.with_columns(group=pl.col("event_type") + "|" + pl.col("security")).select(
+        "event_id", "group", "car_m1p1", "sd_m1p1", "confounded"
+    )
 
 
 def fit_eb(car: np.ndarray, sd: np.ndarray, idx: np.ndarray, n_groups: int) -> dict:
@@ -50,8 +56,13 @@ def fit_pymc(
     n_groups: int,
     seed: int = 0,
     draws: int = 1000,
+    student_t: bool = False,
 ):
-    """Partial-pooling model; returns the arviz InferenceData."""
+    """Partial-pooling model; returns the arviz InferenceData.
+
+    ``student_t`` swaps the Normal likelihood for a Student-t (nu = 2 + Exponential(mean 10)), the
+    heavy-tail sensitivity check.
+    """
     import pymc as pm
 
     with pm.Model():
@@ -64,7 +75,11 @@ def fit_pymc(
         t_z = pm.Normal("t_z", 0, 1, shape=n_groups)
         tau = pm.Deterministic("tau", pm.math.exp(m_tau + s_tau * t_z))
         scale = pm.math.sqrt(sd**2 + tau[idx] ** 2)
-        pm.Normal("obs", a[idx], scale, observed=car)
+        if student_t:
+            nu = pm.Exponential("nu_minus_2", 0.1) + 2
+            pm.StudentT("obs", nu=nu, mu=a[idx], sigma=scale, observed=car)
+        else:
+            pm.Normal("obs", a[idx], scale, observed=car)
         return pm.sample(
             draws=draws,
             tune=1000,
@@ -76,16 +91,14 @@ def fit_pymc(
         )
 
 
-def summarize(path, seed: int = 0) -> dict:
-    """Fit both models on the event table at ``path`` and return the numbers the docs quote."""
+def _summary(d: pl.DataFrame, seed: int, student_t: bool) -> dict:
     import arviz as az
 
-    d = load_events(path)
     groups = sorted(d["group"].unique().to_list())
     idx = np.array([groups.index(g) for g in d["group"]])
     car, sd = d["car_m1p1"].to_numpy(), d["sd_m1p1"].to_numpy()
     eb = fit_eb(car, sd, idx, len(groups))
-    idata = fit_pymc(car, sd, idx, len(groups), seed=seed)
+    idata = fit_pymc(car, sd, idx, len(groups), seed=seed, student_t=student_t)
     post = idata.posterior
     tau, a = post["tau"].values.reshape(-1, len(groups)), post["a"].values.reshape(-1, len(groups))
     summ = az.summary(idata, var_names=["a", "tau"])
@@ -108,4 +121,13 @@ def summarize(path, seed: int = 0) -> dict:
             }
             for i, g in enumerate(groups)
         ],
+    }
+
+
+def summarize(path, seed: int = 0) -> dict:
+    """Fit the model on all events, on clean events only, and with a Student-t likelihood."""
+    return {
+        "all": _summary(load_events(path), seed, False),
+        "clean": _summary(load_events(path, clean_only=True), seed, False),
+        "all_student_t": _summary(load_events(path), seed, True),
     }
