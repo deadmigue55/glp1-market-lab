@@ -28,8 +28,13 @@ def test_primary_table_matches_results():
 
 def test_no_model_beats_the_baseline_and_the_counts_match():
     assert len(R["comparisons"]) == 24 and "all 24 security-horizon-model comparisons" in DOC
-    assert not any(x["beats"] for x in R["comparisons"])
-    assert not any(x["dev_catalyst_p"] < 0.10 for x in R["comparisons"] if x["h"] in (21, 63))
+    wins = [(x["ticker"], x["h"], x["model"]) for x in R["comparisons"] if x["beats"]]
+    assert wins == [("NVO", 1, "M1")] and "one passes the decision rule" in DOC
+    assert "0.01122 for B1 against 0.01115, p = 0.04" in DOC
+    gain = (
+        1 - CMP[("NVO", 1, "M1")]["dev_all_crps_model"] / CMP[("NVO", 1, "M1")]["dev_all_crps_base"]
+    )
+    assert abs(gain - 0.006) < 0.001
     n = {h: CELL[("LLY", h, "M1", "test")]["n"] for h in (1, 5, 21, 63, 126)}
     assert n[126] == 26 and ("LLY", 252, "M1", "test") not in CELL
     assert "252 development" in DOC and "26 at 126 days and none at 252" in DOC
@@ -46,6 +51,8 @@ def test_calibration_claims():
         per = "Development" if row["period"] == "dev" else "Test"
         assert f"| {row['model']} |" in DOC
         assert f"{row['e80']:.3f}" in DOC, (per, row)
-    for m, h, txt in (("B1", 21, "58%"), ("B2", 21, "56%"), ("M2", 21, "85%"), ("B1", 63, "49%")):
+    for m, h, txt in (("B1", 21, "58%"), ("B2", 21, "58%"), ("M2", 21, "88%"), ("B1", 63, "49%")):
         assert f"{100 * CELL[('NVO', h, m, 'test')]['c80']:.0f}%" == txt
-    assert f"{100 * CELL[('NVO', 63, 'M2', 'test')]['c80']:.0f}%" == "95%"
+    assert f"{100 * CELL[('NVO', 63, 'M2', 'test')]['c80']:.0f}%" == "90%"
+    assert round(100 * CELL[("LLY", 126, "M2", "test")]["c80"]) == 96
+    assert CELL[("NVO", 126, "M2", "test")]["c80"] == 1.0

@@ -40,6 +40,7 @@ def test_adaptive_conformal_restores_coverage_when_the_model_is_overconfident():
 def events():
     return pl.DataFrame(
         {
+            "event_id": ["X-20220201-fy2021", "X-20220501-q1-2022", "X-20230601-trial"],
             "event_type": ["earnings_guidance", "earnings_guidance", "trial_readout"],
             "last_day0": [date(2022, 2, 1), date(2022, 5, 1), date(2023, 6, 1)],
             "car_m1p1": [0.10, -0.10, 0.30],
@@ -82,3 +83,25 @@ def test_dm_flags_a_better_model_and_not_an_equal_one():
     _, p_better = fc.dm_one_sided(base, base * 0.7, 21)
     _, p_equal = fc.dm_one_sided(base, base + rng.normal(0, 0.01, 300), 21)
     assert p_better < 0.01 and p_equal > 0.10
+
+
+def test_off_cycle_guidance_change_is_an_unscheduled_jump():
+    ev = events().with_columns(event_id=pl.Series(["a-fy2021", "a-raise-2022", "a-trial"]))
+    assert fc.jump_inputs(ev, date(2024, 1, 1)).last_report == date(2022, 2, 1)
+
+
+def test_bootstrap_pool_has_no_drift():
+    class Res:
+        params = {"omega": 0.0, "alpha[1]": 0.0, "gamma[1]": 0.0, "beta[1]": 0.0}  # noqa: RUF012
+        std_resid = np.r_[np.full(500, 1.0), np.full(500, -0.5)]  # mean +0.25
+        resid = np.array([1.0])
+        conditional_volatility = np.array([1.0])
+
+    paths = fc._paths(Res(), "bootstrap", 1)
+    assert abs(paths[:, 20].mean()) < 0.01 * 3  # no systematic +0.25 per day
+
+
+def test_dm_is_nan_when_bandwidth_swallows_the_sample():
+    d = np.random.default_rng(0).normal(size=26)
+    assert np.isnan(fc.dm_one_sided(d, d * 0.9, 126)[1])  # k = 25 >= n / 3
+    assert not np.isnan(fc.dm_one_sided(d, d * 0.9, 5)[1])

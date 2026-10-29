@@ -25,6 +25,7 @@ LEVELS = np.arange(1, 100) / 100
 SIMS = 2000
 PRIOR_JUMP_SD, PRIOR_WEIGHT = 0.06, 5
 SCHEDULED_GAP = 91  # days between quarterly reports
+OFF_CYCLE = "-(raise|guidance|prelim|lower)"  # ledger ids of unscheduled guidance changes
 
 
 def crps_from_quantiles(q: np.ndarray, y: float) -> float:
@@ -70,6 +71,7 @@ def _paths(res, method: str, seed: int) -> np.ndarray:
     if method == "bootstrap":
         pool = np.asarray(res.std_resid)
         pool = pool[np.isfinite(pool)]
+        pool = pool - pool.mean()  # zero mean like every other model here (review finding 1)
         z = rng.choice(pool, size=(SIMS, horizon))
     else:
         nu = float(p["nu"])
@@ -120,8 +122,10 @@ def jump_inputs(events: pl.DataFrame, origin: date) -> JumpInputs:
         )
         return float(np.sqrt((n * excess + PRIOR_WEIGHT * PRIOR_JUMP_SD**2) / (n + PRIOR_WEIGHT)))
 
-    sched = past.filter(pl.col("event_type") == "earnings_guidance")
-    unsched = past.filter(pl.col("event_type") != "earnings_guidance")
+    is_sched = (pl.col("event_type") == "earnings_guidance") & ~pl.col("event_id").str.contains(
+        OFF_CYCLE
+    )
+    sched, unsched = past.filter(is_sched), past.filter(~is_sched)
     first = events["last_day0"].min()
     years = max((origin - first).days / 365.25, 1.0)
     last = sched["last_day0"].max() if sched.height else None
@@ -229,7 +233,7 @@ def event_frame(cars: pl.DataFrame, ticker: str) -> tuple[pl.DataFrame, pl.DataF
         pl.col("primary") & (pl.col("security") == ticker) & pl.col("car_m1p1").is_not_nan()
     ).with_columns(pl.col("first_day0").str.to_date(), pl.col("last_day0").str.to_date())
     own = d.filter(pl.col("role") == "own").unique(["first_day0", "event_type"])
-    return own.select("event_type", "last_day0", "car_m1p1", "sd_m1p1"), d.select(
+    return own.select("event_id", "event_type", "last_day0", "car_m1p1", "sd_m1p1"), d.select(
         "first_day0", "last_day0"
     )
 
@@ -245,7 +249,9 @@ def origins(dates: list[date]) -> list[int]:
     return out
 
 
-def run_security(con, cars: pl.DataFrame, ticker: str, log=print) -> list[dict]:
+def run_security(
+    con, cars: pl.DataFrame, ticker: str, log=print, final: dict | None = None
+) -> list[dict]:
     px = load_returns(con, ticker).filter(pl.col("date") >= TRAIN_START)
     dates, r = px["date"].to_list(), px["r"].to_numpy()
     lp = np.cumsum(r)  # log price relative to the first date
@@ -284,12 +290,18 @@ def run_security(con, cars: pl.DataFrame, ticker: str, log=print) -> list[dict]:
                         "h": h,
                         "model": m,
                         "y": y,
+                        "due": dates[i + h] if i + h < len(dates) else None,
                         "q": fc[m][h].tolist(),
                         "catalyst_soon": n_scheduled(inp, origin, 21) > 0,
                     }
                 )
         if n % 20 == 0:
             log(f"{ticker} origin {origin} ({n})")
+    if final is not None:  # calibrators as of the last date, for the live forecast
+        for due, h, q, k in sorted(pending, key=lambda x: x[0]):
+            if due < len(dates):
+                ac[h].observe(q, lp[due] - lp[due - h], k)
+        final.update(ac)
     return rows
 
 
@@ -312,9 +324,9 @@ def dm_one_sided(loss_base: np.ndarray, loss_model: np.ndarray, h: int) -> tuple
     """
     d = np.asarray(loss_base) - np.asarray(loss_model)
     n = len(d)
-    if n < 10:
-        return float("nan"), float("nan")
     k = max(int(np.ceil(h / 5)) - 1, 0)
+    if n < max(10, 3 * (k + 1)):  # too few origins for the bandwidth and the Harvey factor
+        return float("nan"), float("nan")
     dm = d - d.mean()
     lrv = dm @ dm / n
     for j in range(1, k + 1):
@@ -326,9 +338,16 @@ def dm_one_sided(loss_base: np.ndarray, loss_model: np.ndarray, h: int) -> tuple
 
 def score(fc: pl.DataFrame) -> dict:
     """Mean CRPS, coverage and pinball by cell, and the decision-rule comparisons."""
-    fc = fc.filter(pl.col("y").is_not_nan()).with_columns(
-        period=pl.when(pl.col("origin") <= DEV_END).then(pl.lit("dev")).otherwise(pl.lit("test"))
-    )
+    fc = (
+        fc.filter(pl.col("y").is_not_nan())
+        .with_columns(
+            period=pl.when((pl.col("origin") <= DEV_END) & (pl.col("due") <= DEV_END))
+            .then(pl.lit("dev"))
+            .when(pl.col("origin") >= TEST_START)
+            .then(pl.lit("test"))
+        )
+        .drop_nulls("period")
+    )  # dev origins whose outcome falls in the test calendar are embargoed
     recs = []
     for row in fc.iter_rows(named=True):
         q, y = np.asarray(row["q"]), row["y"]

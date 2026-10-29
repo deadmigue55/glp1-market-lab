@@ -62,7 +62,7 @@ def fetch(paths: Paths, start: str = "20170101") -> pl.DataFrame:
 
 def attention_index(pv: pl.DataFrame) -> pl.DataFrame:
     """Daily GLP-1 attention: mean of each drug page's log views standardised on its own history
-    up to that day (expanding), so the index never uses later data."""
+    from the page's first day up to that day (expanding), so the index never uses later data."""
     drugs = ["Ozempic", "Wegovy", "Mounjaro", "Zepbound", "Semaglutide", "Tirzepatide"]
     wide = (
         pv.filter(pl.col("article").is_in(drugs))
@@ -72,12 +72,14 @@ def attention_index(pv: pl.DataFrame) -> pl.DataFrame:
     cols = [c for c in wide.columns if c != "date"]
     z = []
     for c in cols:
-        x = np.log1p(wide[c].fill_null(0).to_numpy().astype(float))
-        mu = np.cumsum(x) / np.arange(1, len(x) + 1)
-        var = np.cumsum(x**2) / np.arange(1, len(x) + 1) - mu**2
-        z.append(
-            np.where(np.arange(len(x)) > 60, (x - mu) / np.sqrt(np.maximum(var, 1e-9)), np.nan)
-        )
+        raw = wide[c].to_numpy().astype(float)  # null before the page existed -> nan
+        first = int(np.argmax(~np.isnan(raw)))  # standardise from the page's own first day
+        x = np.log1p(np.nan_to_num(raw))[first:]
+        n = np.arange(1, len(x) + 1)
+        mu = np.cumsum(x) / n
+        var = np.cumsum(x**2) / n - mu**2
+        zc = np.where(n > 60, (x - mu) / np.sqrt(np.maximum(var, 1e-9)), np.nan)
+        z.append(np.r_[np.full(first, np.nan), zc])
     return wide.select("date").with_columns(attention=np.nanmean(np.column_stack(z), axis=1))
 
 
