@@ -1,6 +1,6 @@
 [project]
 name = "glp1-market-lab"
-version = "0.1.0"
+version = "1.0.0"
 description = "How GLP-1 news moves pharma, medtech and food stocks, and a forecast that updates with the news."
 readme = "README.md"
 license = "MIT"
