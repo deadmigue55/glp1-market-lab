@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from datetime import UTC, date, datetime, timedelta
+from datetime import time as clock
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -27,6 +29,7 @@ from glp1.universe import BY_TICKER
 LIVE = ("LLY", "NVO")
 SIGMA_GRID = [1, 2, 3, 5, 10, 15, 21, 30, 42, 63, 84, 105, 126, 168, 210, 252]
 TRADING_PER_YEAR = 252
+LIVE_GAMMA = 0.02 / 5  # the backtest stepped weekly, the live ledger steps daily
 GENESIS = "0" * 64
 
 
@@ -54,19 +57,30 @@ def drop_open_session(df: pl.DataFrame, now: datetime) -> pl.DataFrame:
 
 
 def fresh_prices(paths: Paths, ticker: str, now: datetime) -> pl.DataFrame:
-    with httpx.Client(headers={"User-Agent": yahoo.USER_AGENT}, timeout=30) as client:
-        ok = yahoo.fetch(paths, BY_TICKER[ticker], now.date() + timedelta(days=1), client)
+    for attempt in range(3):  # runner IPs are sometimes throttled; an origin cannot be backfilled
+        try:
+            with httpx.Client(headers={"User-Agent": yahoo.USER_AGENT}, timeout=30) as client:
+                ok = yahoo.fetch(paths, BY_TICKER[ticker], now.date() + timedelta(days=1), client)
+            break
+        except httpx.HTTPError:
+            if attempt == 2:
+                raise
+            time.sleep(10 * (attempt + 1))
     got = yahoo.load_cached(paths, ticker) if ok else None
     if got is None:
         raise RuntimeError(f"no prices for {ticker}")
-    return drop_open_session(got[0].sort("date"), now)
+    return drop_open_session(got[0].sort("date").drop_nulls(["close", "adj_close"]), now)
 
 
 # ── catalysts and scenario inputs ────────────────────────────────────────────
 
 
-def earnings_outcomes(cars: pl.DataFrame, ticker: str) -> list[dict]:
-    """How the stock moved on earnings days where guidance was raised, kept or cut (own history)."""
+def earnings_outcomes(cars: pl.DataFrame, ticker: str, sched_sd: float | None = None) -> list[dict]:
+    """How the stock moved on earnings days where guidance was raised, kept or cut (own history).
+
+    Means are centred on the average report (the event study found no average earnings-day move) and
+    the spreads are scaled so the mix has the same variance as the model's own earnings jump.
+    """
     d = cars.filter(
         pl.col("primary")
         & (pl.col("role") == "own")
@@ -93,15 +107,29 @@ def earnings_outcomes(cars: pl.DataFrame, ticker: str) -> list[dict]:
                 "label": label,
                 "n": g.height,
                 "probability": round(g.height / total, 4),
-                "mean": round(float(g["car_m1p1"].mean()), 4),
-                "sd": round(sd, 4),
+                "raw_mean": round(float(g["car_m1p1"].mean()), 4),
+                "sd": sd,
             }
         )
+    mix = sum(o["probability"] * o["raw_mean"] for o in out)
+    between = sum(o["probability"] * (o["raw_mean"] - mix) ** 2 for o in out)
+    within = sum(o["probability"] * o["sd"] ** 2 for o in out)
+    scale = 1.0
+    if sched_sd:
+        scale = min(1.0, max(0.3, np.sqrt(max(sched_sd**2 - between, 0.1 * sched_sd**2) / within)))
+    for o in out:
+        o["mean"] = round(o["raw_mean"] - mix, 4)
+        o["sd"] = round(o["sd"] * scale, 4)
     return out
 
 
 def catalyst_list(
-    cal: pl.DataFrame, ticker: str, today: date, cars: pl.DataFrame, markets: list[dict]
+    cal: pl.DataFrame,
+    ticker: str,
+    today: date,
+    cars: pl.DataFrame,
+    markets: list[dict],
+    sched_sd: float | None = None,
 ) -> list[dict]:
     """Upcoming modelled catalysts for one stock with default outcome probabilities."""
     out = []
@@ -109,6 +137,8 @@ def catalyst_list(
         end = r["window_end"]
         if end < today:
             continue
+        if r["event_type"] == "earnings_guidance" and r["window_start"] <= today:
+            continue  # a report on or before the origin is already in the price
         item = {
             "id": r["catalyst_id"],
             "title": r["title"],
@@ -120,7 +150,7 @@ def catalyst_list(
         }
         if r["event_type"] == "earnings_guidance":
             item["model"] = "earnings"
-            item["outcomes"] = earnings_outcomes(cars, ticker)
+            item["outcomes"] = earnings_outcomes(cars, ticker, sched_sd)
         elif "cagrisema" in r["title"].lower() or "FDA decision" in r["title"]:
             item["model"] = "approval"
             soon = [m for m in markets if m["probability"] is not None]
@@ -148,7 +178,7 @@ def load_aci(paths: Paths) -> dict:
     for tk in LIVE:
         out[tk] = {}
         for h in fc.HORIZONS:
-            ac = fc.AdaptiveConformal()
+            ac = fc.AdaptiveConformal(gamma=LIVE_GAMMA)
             s = state.get(tk, {}).get(str(h))
             if s:
                 ac.alpha_t, ac.scores = s["alpha_t"], list(s["scores"])
@@ -168,6 +198,7 @@ def seed_aci(paths: Paths) -> None:
         fc.run_security(con, cars, tk, final=aci[tk])
     (paths.root / "forecasts").mkdir(exist_ok=True)
     save_aci(paths, aci)
+    save_scored(paths, set())  # the seeded state has seen no live outcome
 
 
 def save_aci(paths: Paths, aci: dict) -> None:
@@ -225,7 +256,10 @@ def forecast_one(
     res = fc._fit(fc.clip_event_days(r, is_event))
     paths_ = fc._paths(res, "simulation", seed_for(origin, ticker))
     sd_grid = {h: float(np.std(paths_[:, h - 1])) for h in SIGMA_GRID}
-    m1 = fc.m1(r, is_event, inp, origin, seed_for(origin, ticker))
+    offsets = sched_offsets(inp, origin)
+    m1 = fc.m1(
+        r, is_event, inp, origin, seed_for(origin, ticker), lambda h: sum(o <= h for o in offsets)
+    )
     spot = float(px["close"][-1])
     out = {
         "ticker": ticker,
@@ -237,7 +271,7 @@ def forecast_one(
             str(h): [round(float(x), 5) for x in np.quantile(paths_[:, h - 1], fc.LEVELS)]
             for h in SIGMA_GRID
         },
-        "sched_offsets": sched_offsets(inp, origin),
+        "sched_offsets": offsets,
         "jumps": {
             "scheduled_sd": inp.sched_sd,
             "unscheduled_sd": inp.unsched_sd,
@@ -261,7 +295,15 @@ def forecast_one(
 def read_ledger(path: Path) -> list[dict]:
     if not path.exists():
         return []
-    return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
+    lines = [x for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
+    rows = []
+    for i, x in enumerate(lines):
+        try:
+            rows.append(json.loads(x))
+        except json.JSONDecodeError:
+            if i < len(lines) - 1:  # only a torn last line (a crashed write) is forgiven
+                raise
+    return rows
 
 
 def entry_hash(prev: str, body: dict) -> str:
@@ -293,9 +335,8 @@ def append_ledger(path: Path, forecasts: list[dict], made_at: str) -> int:
                 "m2": fcast["m2"],
             }
             h = entry_hash(prev, body)
-            f.write(
-                json.dumps({"prev": prev, "hash": h, "body": body}, separators=(",", ":")) + "\n"
-            )
+            line = {"prev": prev, "hash": h, "body": body}
+            f.write(json.dumps(line, separators=(",", ":"), allow_nan=False) + "\n")
             prev, added = h, added + 1
     return added
 
@@ -310,12 +351,20 @@ def verify_ledger(path: Path) -> bool:
     return True
 
 
-def score_ledger(paths: Paths, prices: dict[str, pl.DataFrame], aci: dict) -> dict:
-    """Score matured entries and feed their outcomes to the conformal state exactly once."""
-    sf = paths.root / "forecasts" / "scored.json"
-    done = set(json.loads(sf.read_text(encoding="utf-8"))) if sf.exists() else set()
+def made_after_close(made_at: str, day: date) -> bool:
+    """True when the forecast was written after the close of ``day`` (its outcome was public)."""
+    et = ZoneInfo("America/New_York")
+    return datetime.fromisoformat(made_at).astimezone(et) >= datetime.combine(day, clock(16), et)
+
+
+def score_ledger(path: Path, prices: dict[str, pl.DataFrame], aci: dict, done: set[str]) -> dict:
+    """Score matured entries and feed their outcomes to the conformal state exactly once.
+
+    An entry written after its outcome was public (a late run) stays in the ledger but is neither
+    scored nor fed to the calibrator.
+    """
     rows = []
-    for row in read_ledger(ledger_path(paths)):
+    for row in read_ledger(path):
         b = row["body"]
         px = prices[b["ticker"]].sort("date")
         dates = px["date"].to_list()
@@ -327,6 +376,9 @@ def score_ledger(paths: Paths, prices: dict[str, pl.DataFrame], aci: dict) -> di
         for h in b["horizons"]:
             key = f"{b['ticker']}|{b['origin']}|{h}"
             if i + h >= len(dates):
+                continue
+            if made_after_close(b["made_at"], dates[i + h]):
+                done.add(key)
                 continue
             y = float(lp[i + h] - lp[i])
             q2, q1 = np.asarray(b["m2"][str(h)]), np.asarray(b["m1"][str(h)])
@@ -345,11 +397,9 @@ def score_ledger(paths: Paths, prices: dict[str, pl.DataFrame], aci: dict) -> di
             if key not in done:
                 aci[b["ticker"]][h].observe(q1, y, b["k"][str(h)])
                 done.add(key)
-    sf.write_text(json.dumps(sorted(done)), encoding="utf-8")
-    df = pl.DataFrame(rows) if rows else None
     summary = []
-    if df is not None:
-        for (tk, h), g in df.group_by("ticker", "h"):
+    if rows:
+        for (tk, h), g in pl.DataFrame(rows).group_by("ticker", "h"):
             summary.append(
                 {
                     "ticker": tk,
@@ -364,6 +414,16 @@ def score_ledger(paths: Paths, prices: dict[str, pl.DataFrame], aci: dict) -> di
         "resolved": rows[-200:],
         "summary": sorted(summary, key=lambda x: (x["ticker"], x["h"])),
     }
+
+
+def load_scored(paths: Paths) -> set[str]:
+    f = paths.root / "forecasts" / "scored.json"
+    return set(json.loads(f.read_text(encoding="utf-8"))) if f.exists() else set()
+
+
+def save_scored(paths: Paths, done: set[str]) -> None:
+    f = paths.root / "forecasts" / "scored.json"
+    f.write_text(json.dumps(sorted(done)), encoding="utf-8")
 
 
 # ── driver ───────────────────────────────────────────────────────────────────
@@ -428,12 +488,19 @@ def run(paths: Paths, now: datetime | None = None, markets: list[dict] | None = 
     cal = ledger.load_forward(paths)
     prices = {tk: fresh_prices(paths, tk, now) for tk in LIVE}
     aci = load_aci(paths)
-    scorecard = score_ledger(paths, prices, aci)
-    markets = kalshi.fetch() if markets is None else markets
+    done = load_scored(paths)
+    scorecard = score_ledger(ledger_path(paths), prices, aci, done)
+    if markets is None:
+        try:
+            markets = kalshi.fetch()
+        except (httpx.HTTPError, KeyError, ValueError):
+            markets = []  # an outage must not cost the day's forecast
     forecasts = []
     for tk in LIVE:
         f = forecast_one(tk, prices[tk], cars, cal, aci)
-        f["catalysts"] = catalyst_list(cal, tk, date.fromisoformat(f["origin"]), cars, markets)
+        f["catalysts"] = catalyst_list(
+            cal, tk, date.fromisoformat(f["origin"]), cars, markets, f["jumps"]["scheduled_sd"]
+        )
         f["history"] = [
             {"date": str(d), "close": round(c, 2)}
             for d, c in zip(prices[tk]["date"][-300:], prices[tk]["close"][-300:], strict=True)
@@ -441,10 +508,16 @@ def run(paths: Paths, now: datetime | None = None, markets: list[dict] | None = 
         forecasts.append(f)
     added = append_ledger(ledger_path(paths), forecasts, now.isoformat(timespec="seconds"))
     save_aci(paths, aci)
+    save_scored(paths, done)  # together with the calibrator: one without the other double counts
     out = data_dir(paths)
     (out / "forecast.json").write_text(
         json.dumps(
-            {"generated": now.isoformat(timespec="seconds"), "stocks": forecasts, "kalshi": markets}
+            {
+                "generated": now.isoformat(timespec="seconds"),
+                "stocks": forecasts,
+                "kalshi": markets,
+            },
+            allow_nan=False,
         ),
         encoding="utf-8",
     )

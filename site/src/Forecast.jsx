@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import FanChart from "./FanChart.jsx";
 import { useSim } from "./useSim.js";
-import { addWeekdays, fmtDate, fmtMoney, fmtPct } from "./util.js";
+import { addWeekdays, fmtDate, fmtMoney, fmtPct, plural } from "./util.js";
 
 const VIEWS = [21, 63, 126, 252];
 const N = 6000;
@@ -60,6 +60,7 @@ export default function Forecast({ stock }) {
   const rows = [...steps, ...(Math.abs(inter) > 0.005 * stock.spot ? [["Both together", inter, true]] : [])];
 
   const cats = stock.catalysts
+    .filter((c) => c.model !== "approval" || c.market)
     .map((c, i) => ({
       ...c,
       short: c.model === "earnings" ? "earnings" : c.model === "approval" ? "FDA" : "",
@@ -80,7 +81,7 @@ export default function Forecast({ stock }) {
         </div>
         <FanChart stock={stock} result={full} base={changed ? baseRun : null} view={view} sel={at} catalysts={cats} />
         <label className="small" htmlFor="hz">
-          Look at a point in time: {at} trading days ahead (about {fmtDate(addWeekdays(stock.origin, at))})
+          Look at a point in time: {plural(at, "trading day")} ahead (about {fmtDate(addWeekdays(stock.origin, at))})
         </label>
         <input
           id="hz"
@@ -89,6 +90,7 @@ export default function Forecast({ stock }) {
           min="0"
           max={shown.length - 1}
           value={Math.max(0, shown.indexOf(at))}
+          aria-valuetext={`${plural(at, "trading day")} ahead`}
           onChange={(e) => setSel(shown[+e.target.value])}
         />
         <div className="readout" aria-live="polite">
@@ -135,7 +137,7 @@ export default function Forecast({ stock }) {
           {earn && (
             <fieldset style={{ border: 0, padding: 0, margin: "10px 0" }}>
               <legend>
-                <b>{earn.title}</b> <span className="small">(in {earn.offset} trading days)</span>
+                <b>{earn.title}</b> <span className="small">(in {plural(earn.offset, "trading day")})</span>
               </legend>
               <div className="seg">
                 <label>
@@ -151,7 +153,7 @@ export default function Forecast({ stock }) {
               </div>
               <p className="small">
                 {earn.outcomes
-                  .map((o) => `${o.label.replace("guidance ", "")}: ${Math.round(o.probability * 100)}% of past reports (${o.n}), typical 3-day move ${fmtPct(o.mean)}`)
+                  .map((o) => `${o.label.replace("guidance ", "")}: ${Math.round(o.probability * 100)}% of past reports (${o.n}), three-day move ${fmtPct(o.mean)} against an average report`)
                   .join(" · ")}
               </p>
             </fieldset>
@@ -159,7 +161,7 @@ export default function Forecast({ stock }) {
           {appr && (
             <fieldset style={{ border: 0, padding: 0, margin: "10px 0" }}>
               <legend>
-                <b>FDA decision on CagriSema</b> <span className="small">(about {appr.offset} trading days)</span>
+                <b>FDA decision on CagriSema</b> <span className="small">(about {plural(appr.offset, "trading day")} away)</span>
               </legend>
               <label className="small" htmlFor="pa">
                 My chance of approval: {Math.round((choice.p ?? appr.market.probability) * 100)}% (the market says {Math.round(appr.market.probability * 100)}%)
@@ -179,8 +181,9 @@ export default function Forecast({ stock }) {
                 <label><input type="radio" name="pick" checked={choice.pick === "rejected"} onChange={() => setChoice({ ...choice, pick: "rejected" })} />Rejected</label>
               </div>
               <p className="small">
-                Market price: {appr.market.title} Moves are sized from Novo's past unscheduled news days (±
-                {(stock.jumps.unscheduled_sd * 100).toFixed(1)}%), split so that the market's own odds give zero average move.
+                Market price: {appr.market.title} A delay counts as "no" there. The jump is sized from Novo's typical unscheduled news day (about
+                {(stock.jumps.unscheduled_sd * 100).toFixed(0)}%) and split so that the market's own odds give zero average move.
+                It comes on top of the model's general news jumps, so the default fan is a little wider than the nightly forecast in the ledger.
               </p>
             </fieldset>
           )}

@@ -159,13 +159,15 @@ def clip_event_days(r: np.ndarray, is_event: np.ndarray) -> np.ndarray:
     return out
 
 
-def m1(r: np.ndarray, is_event: np.ndarray, inp: JumpInputs, origin: date, seed: int) -> dict:
+def m1(
+    r: np.ndarray, is_event: np.ndarray, inp: JumpInputs, origin: date, seed: int, count=None
+) -> dict:
     res = _fit(clip_event_days(r, is_event))
     paths = _paths(res, "simulation", seed)
     rng = np.random.default_rng(seed)
     out = {}
     for h in HORIZONS:
-        k = n_scheduled(inp, origin, h)
+        k = count(h) if count else n_scheduled(inp, origin, h)
         jumps = rng.normal(0, inp.sched_sd, (SIMS, k)).sum(axis=1) if k else np.zeros(SIMS)
         nu = rng.poisson(inp.unsched_rate * h / 252, SIMS)
         jumps = jumps + rng.normal(0, 1, SIMS) * inp.unsched_sd * np.sqrt(nu)

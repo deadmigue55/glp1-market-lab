@@ -2,6 +2,7 @@ export const fmtPct = (x, d = 1) => {
   const t = Math.abs(x * 100).toFixed(d);
   return +t === 0 ? `${t}%` : `${x >= 0 ? "+" : "−"}${t}%`;
 };
+export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 export const fmtMoney = (x) =>
   x >= 1000 ? `$${Math.round(x).toLocaleString("en-US")}` : `$${x.toFixed(x >= 100 ? 0 : 2)}`;
 

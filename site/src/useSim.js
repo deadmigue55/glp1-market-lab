@@ -16,6 +16,7 @@ export function useSim(jobs, key) {
       worker.current.onmessage = (e) => {
         if (e.data.id === seq.current) setResults(e.data.results);
       };
+      worker.current.onerror = () => setResults(jobs.map((j) => simulate(j.stock, j.scenario, j.opts)));
       worker.current.postMessage({ id, jobs });
     } catch {
       setResults(jobs.map((j) => simulate(j.stock, j.scenario, j.opts)));

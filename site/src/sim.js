@@ -22,11 +22,11 @@ function normal(r) {
 }
 
 // Draw from a distribution known by its 99 quantiles (levels 0.01..0.99): linear between them,
-// exponential tails beyond.
+// exponential tails beyond, with the scale that passes through the 1% and 2% points.
 export function fromQuantiles(q, u) {
   const p = u * 100 - 1;
-  if (p < 0) return q[0] + (q[1] - q[0]) * Math.log(Math.max(u, 1e-12) / 0.01);
-  if (p >= 98) return q[98] - (q[98] - q[97]) * Math.log(Math.max(1 - u, 1e-12) / 0.01);
+  if (p < 0) return q[0] + ((q[1] - q[0]) / Math.LN2) * Math.log(Math.max(u, 1e-12) / 0.01);
+  if (p >= 98) return q[98] - ((q[98] - q[97]) / Math.LN2) * Math.log(Math.max(1 - u, 1e-12) / 0.01);
   const i = Math.floor(p);
   const f = p - i;
   return q[i] * (1 - f) + q[i + 1] * f;
@@ -78,7 +78,6 @@ export function simulate(stock, scenario, { n = 6000, seed = 1, k = true } = {})
   const rApp = rng(seed * 11 + 5);
   const x = new Map(grid.map((h) => [h, new Float64Array(n)]));
   const lam = jp.unscheduled_per_year / 252;
-  const mixMean = earn ? earn.outcomes.reduce((s, o) => s + o.probability * o.mean, 0) : 0;
   const maxH = grid[grid.length - 1];
   for (let i = 0; i < n; i++) {
     const u = rDiff();
@@ -99,9 +98,8 @@ export function simulate(stock, scenario, { n = 6000, seed = 1, k = true } = {})
           if (ue < c) { o = j; break; }
         }
       }
-      // the model's own mix is centred: the event study found no average earnings-day move
-      const shift = earn.pick === null || earn.pick === undefined ? -mixMean : 0;
-      jumps.push([earn.offset, earn.outcomes[o].mean + shift + earn.outcomes[o].sd * z]);
+      // outcome means arrive centred on the average report (see nightly.earnings_outcomes)
+      jumps.push([earn.offset, earn.outcomes[o].mean + earn.outcomes[o].sd * z]);
     }
     if (appr) {
       const ua = rApp();

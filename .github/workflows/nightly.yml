@@ -40,5 +40,10 @@ jobs:
             echo "nothing new"
           else
             git commit -m "Nightly forecast $(date -u +%F)"
-            git push
+            # main may have moved while this ran; a missed push is a permanently missing ledger day
+            for i in 1 2 3; do
+              git pull --rebase -X theirs && git push && exit 0
+              sleep 5
+            done
+            exit 1
           fi

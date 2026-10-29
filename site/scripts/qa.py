@@ -90,6 +90,24 @@ with sync_playwright() as p:
     settle(page)
     rejected = middle(page)
     check("FDA approval beats rejection", approved > rejected, f"{approved} > {rejected}")
+    page.locator("input[name=pick]").nth(0).check(force=True)
+    page.locator("input[name=earn]").nth(0).check(force=True)
+    settle(page)
+    mix = middle(page)
+    page.locator("input[name=earn]").nth(1).check(force=True)
+    settle(page)
+    n_raised = middle(page)
+    page.locator("input[name=earn]").nth(3).check(force=True)
+    settle(page)
+    n_cut = middle(page)
+    check(
+        "Novo: raised >= model mix > cut (picks agree with the default)",
+        n_cut < mix <= n_raised,
+        f"{n_cut} < {mix} <= {n_raised}",
+    )
+    page.locator("input[name=earn]").nth(0).check(force=True)
+    page.locator("input[name=pick]").nth(2).check(force=True)
+    settle(page)
     page.screenshot(path=str(OUT / "02-novo-scenario.png"), full_page=False)
     page.get_by_role("button", name="Reset to the model").click()
 

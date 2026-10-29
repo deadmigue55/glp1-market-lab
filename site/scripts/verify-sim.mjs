@@ -4,7 +4,9 @@ import { readFileSync } from "node:fs";
 import { simulate } from "../src/sim.js";
 
 const data = JSON.parse(readFileSync(new URL("../public/data/forecast.json", import.meta.url)));
-const TOL = 0.1; // of the half-width of the 80% interval
+// Of the half-width of the 80% interval. Python's own 2000-path noise reaches 0.09 at the worst
+// level, and it changes every night, so a tight bound would fail the deploy at random.
+const TOL = 0.25;
 let worst = 0;
 let bad = 0;
 for (const stock of data.stocks) {

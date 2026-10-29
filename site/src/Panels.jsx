@@ -146,7 +146,7 @@ export function Scorecard({ back, card }) {
     <div className="grid2">
       <div className="card">
         <h3>How often the 80% range held (backtest, Nov 2025 to now)</h3>
-        <p className="small">A well-calibrated 80% range holds 80% of the time. Few independent periods, so treat gaps as rough.</p>
+        <p className="small">Each cell: share of outcomes inside the 80% range · average error score (CRPS, lower is better). A well-calibrated range holds 80% of the time. The wide ranges of this model hold more often but score no better: it is calibrated, not sharper. Each stock's 63-day figures rest on about three independent windows in one regime.</p>
         <div className="scroll">
           <table>
             <thead>
@@ -156,7 +156,7 @@ export function Scorecard({ back, card }) {
               {["LLY", "NVO"].flatMap((tk) => [21, 63, 126].map((h) => (
                 <tr key={tk + h}>
                   <td>{tk}</td><td>{h}</td>
-                  {models.map((m) => <td key={m} className="r num">{Math.round(get(tk, h, m).c80 * 100)}%</td>)}
+                  {models.map((m) => <td key={m} className="r num">{Math.round(get(tk, h, m).c80 * 100)}% · {get(tk, h, m).crps.toFixed(3)}</td>)}
                 </tr>
               )))}
             </tbody>
@@ -170,7 +170,7 @@ export function Scorecard({ back, card }) {
             <thead><tr><th>Stock</th><th>Days</th><th className="r">Scored</th><th className="r">In 80% range</th></tr></thead>
             <tbody>
               {card.summary.map((s) => (
-                <tr key={s.ticker + s.h}><td>{s.ticker}</td><td>{s.h}</td><td className="r num">{s.n}</td><td className="r num">{Math.round(s.coverage80 * 100)}%</td></tr>
+                <tr key={s.ticker + s.h}><td>{s.ticker}</td><td>{s.h}</td><td className="r num">{s.n}</td><td className="r num">{s.n >= 20 ? `${Math.round(s.coverage80 * 100)}%` : "too few"}</td></tr>
               ))}
             </tbody>
           </table>

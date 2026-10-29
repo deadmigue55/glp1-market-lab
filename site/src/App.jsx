@@ -35,12 +35,10 @@ export default function App() {
       <div className="wrap">
         <header className="top">
           <strong>Weight of News</strong>
-          <span>
-            <nav style={{ display: "inline" }} aria-label="Sections">
-              <a href="#forecast">Forecast</a><a href="#news">News</a><a href="#value">Valuation</a><a href="#record">Record</a><a href={REPO}>Code</a>
-            </nav>
-            <button className="theme" onClick={toggle} aria-pressed={dark}>{dark ? "Light" : "Dark"}</button>
-          </span>
+          <nav aria-label="Sections">
+            <a href="#forecast">Forecast</a><a href="#news">News</a><a href="#value">Valuation</a><a href="#record">Record</a><a href={REPO}>Code</a>
+            <button className="theme" onClick={toggle}>{dark ? "Light theme" : "Dark theme"}</button>
+          </nav>
         </header>
         <main>
           <div className="hero">
@@ -63,9 +61,9 @@ export default function App() {
               <section id="forecast" aria-labelledby="h-forecast">
                 <h2 id="h-forecast">Forecast: change the news, see the range move</h2>
                 <p className="lead">
-                  The shaded fan is where the share price is likely to be: the dark band holds half of simulated outcomes,
-                  the light band four in five. It comes from a volatility model plus jumps for dated events, widened where
-                  past forecasts of this kind were too confident.
+                  The shaded fan is where the share price is likely to be: the darkest band holds half of simulated outcomes,
+                  the next four in five and the lightest nine in ten. It comes from a volatility model plus jumps for dated
+                  events, widened where past forecasts of this kind were too confident.
                 </p>
                 <div className="tabs" role="group" aria-label="Company">
                   {data.forecast.stocks.map((s) => (
@@ -80,8 +78,9 @@ export default function App() {
               <section id="news" aria-labelledby="h-news">
                 <h2 id="h-news">What past news did</h2>
                 <p className="lead">
-                  {data.events.length} stock reactions to {new Set(data.events.map((e) => e.event_id)).size} dated announcements since 2017: trial results, regulatory decisions, earnings and
-                  policy. On average the moves cancel out; what matters is the surprise, and a few days move the stock a lot.
+                  {data.events.length} dated announcements since 2018: trial results, regulatory decisions, earnings and
+                  policy. On average the moves cancel out; guidance changes seem to matter more than headline weight loss,
+                  and a few days move a stock a lot.
                 </p>
                 <Events events={data.events} />
               </section>
@@ -99,7 +98,7 @@ export default function App() {
                 <h2 id="h-record">Track record</h2>
                 <p className="lead">
                   Forecasts are only worth something if they are checked. Past ranges are tested against what happened, and
-                  every new forecast is locked into a public ledger before the outcome is known.
+                  every new forecast is locked into a public ledger and scored once its outcome is known.
                 </p>
                 <Scorecard back={data.backtest} card={data.scorecard} />
               </section>

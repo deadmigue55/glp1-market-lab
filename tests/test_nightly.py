@@ -1,6 +1,9 @@
+import json
 from datetime import UTC, date, datetime
 
+import numpy as np
 import polars as pl
+import pytest
 
 from glp1 import kalshi, nightly
 
@@ -80,3 +83,56 @@ def test_kalshi_probability_uses_midpoint_then_last():
     wide = {"yes_bid_dollars": "0.10", "yes_ask_dollars": "0.90", "last_price_dollars": "0.40"}
     assert kalshi.implied_probability(wide) == 0.40
     assert kalshi.implied_probability({}) is None
+
+
+def test_earnings_outcomes_are_centred_and_scaled_to_the_model_jump():
+    rng = np.random.default_rng(0)
+    n = 40
+    sup = rng.choice([-1.0, 0.0, 1.0], n, p=[0.2, 0.3, 0.5])
+    cars = pl.DataFrame(
+        {
+            "primary": [True] * n,
+            "role": ["own"] * n,
+            "security": ["LLY"] * n,
+            "event_type": ["earnings_guidance"] * n,
+            "surprise": sup,
+            "car_m1p1": 0.05 * sup + 0.02 + rng.normal(0, 0.08, n),
+        }
+    )
+    out = nightly.earnings_outcomes(cars, "LLY", sched_sd=0.08)
+    mean = sum(o["probability"] * o["mean"] for o in out)
+    var = sum(o["probability"] * (o["sd"] ** 2 + o["mean"] ** 2) for o in out)
+    assert abs(mean) < 1e-3
+    assert abs(var - 0.08**2) < 0.0003  # the mix has the model's own earnings-jump variance
+
+
+def test_late_entry_is_not_scored_or_fed_to_the_calibrator(tmp_path):
+    f = tmp_path / "ledger.jsonl"
+    q = [0.001 * i - 0.05 for i in range(99)]
+    body = fcast("2026-10-27") | {"horizons": [1], "m1": {"1": q}, "m2": {"1": q}, "k": {"1": 1.0}}
+    nightly.append_ledger(f, [body], "2026-10-29T00:02:00+00:00")  # 20:02 ET on 10-28
+    days = [date(2026, 10, 26), date(2026, 10, 27), date(2026, 10, 28)]
+    px = pl.DataFrame({"date": days, "adj_close": [100.0, 101.0, 102.0]})
+    aci = {"LLY": {1: nightly.fc.AdaptiveConformal()}}
+    done: set[str] = set()
+    card = nightly.score_ledger(f, {"LLY": px}, aci, done)
+    assert card["summary"] == [] and aci["LLY"][1].scores == []
+    assert done == {"LLY|2026-10-27|1"}  # remembered, so it is never reconsidered
+
+    g = tmp_path / "ledger2.jsonl"
+    nightly.append_ledger(g, [body], "2026-10-27T22:30:00+00:00")  # 18:30 ET, before the outcome
+    done2: set[str] = set()
+    card2 = nightly.score_ledger(g, {"LLY": px}, aci, done2)
+    assert card2["summary"][0]["n"] == 1 and len(aci["LLY"][1].scores) == 1
+
+
+def test_a_torn_last_line_is_ignored_but_a_torn_middle_line_is_not(tmp_path):
+    f = tmp_path / "ledger.jsonl"
+    nightly.append_ledger(f, [fcast("2026-10-26"), fcast("2026-10-27")], "t")
+    good = f.read_text()
+    f.write_text(good + '{"prev": "ab')
+    assert len(nightly.read_ledger(f)) == 2
+    lines = good.splitlines()
+    f.write_text(lines[0][:20] + "\n" + lines[1] + "\n")
+    with pytest.raises(json.JSONDecodeError):
+        nightly.read_ledger(f)
