@@ -1,5 +1,10 @@
 # Weight of News
 
+[![CI](https://github.com/deadmigue55/glp1-market-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/deadmigue55/glp1-market-lab/actions/workflows/ci.yml)
+[![Nightly forecast](https://github.com/deadmigue55/glp1-market-lab/actions/workflows/nightly.yml/badge.svg)](https://github.com/deadmigue55/glp1-market-lab/actions/workflows/nightly.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)
+
 **How much does GLP-1 news move the stocks of the companies that make the drugs, the ones that sell to them
 and the ones that may lose from them, and can a forecast stay honest while the news keeps changing?**
 
