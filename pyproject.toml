@@ -51,6 +51,7 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["B011", "E501"]
+"site/scripts/*.py" = ["E501"]
 "src/glp1/checks.py" = ["E501"]  # SQL strings and messages read better on long lines
 "src/glp1/warehouse.py" = ["E501"]
 "src/glp1/doctor.py" = ["E501"]  # source URLs

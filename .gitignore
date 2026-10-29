@@ -34,3 +34,8 @@ node_modules/
 Thumbs.db
 .vscode/
 .idea/
+
+# Live app build output and local QA
+site/dist/
+site/qa-shots/
+site/preview.log

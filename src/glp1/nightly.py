@@ -26,6 +26,7 @@ from glp1.universe import BY_TICKER
 
 LIVE = ("LLY", "NVO")
 SIGMA_GRID = [1, 2, 3, 5, 10, 15, 21, 30, 42, 63, 84, 105, 126, 168, 210, 252]
+TRADING_PER_YEAR = 252
 GENESIS = "0" * 64
 
 
@@ -114,6 +115,7 @@ def catalyst_list(
             "type": r["event_type"],
             "window_start": str(r["window_start"]),
             "window_end": str(r["window_end"]),
+            "offset": max(offset(r["window_start"] + (end - r["window_start"]) / 2, today), 1),
             "source": r["source_url"],
         }
         if r["event_type"] == "earnings_guidance":
@@ -176,6 +178,23 @@ def save_aci(paths: Paths, aci: dict) -> None:
     (paths.root / "forecasts" / "aci_state.json").write_text(json.dumps(state), encoding="utf-8")
 
 
+def offset(day: date, origin: date) -> int:
+    """Weekdays from the origin to a calendar day (US holidays are not subtracted)."""
+    return int(np.busday_count(origin, day))
+
+
+def sched_offsets(inp: fc.JumpInputs, origin: date) -> list[int]:
+    """Trading-day offsets of the reports the jump model expects within a year."""
+    out, nxt = [], inp.last_report
+    while nxt is not None:
+        nxt = nxt + timedelta(days=fc.SCHEDULED_GAP)
+        if offset(nxt, origin) > TRADING_PER_YEAR:
+            return out
+        if nxt > origin:
+            out.append(offset(nxt, origin))
+    return out
+
+
 def next_report(cal: pl.DataFrame, ticker: str, origin: date) -> date | None:
     d = cal.filter(
         (pl.col("ticker") == ticker)
@@ -214,6 +233,11 @@ def forecast_one(
         "spot": spot,
         "nu": float(res.params["nu"]),
         "diffusion_sd": {str(h): v for h, v in sd_grid.items()},
+        "diffusion_q": {
+            str(h): [round(float(x), 5) for x in np.quantile(paths_[:, h - 1], fc.LEVELS)]
+            for h in SIGMA_GRID
+        },
+        "sched_offsets": sched_offsets(inp, origin),
         "jumps": {
             "scheduled_sd": inp.sched_sd,
             "unscheduled_sd": inp.unsched_sd,
@@ -345,6 +369,59 @@ def score_ledger(paths: Paths, prices: dict[str, pl.DataFrame], aci: dict) -> di
 # ── driver ───────────────────────────────────────────────────────────────────
 
 
+def site_data(paths: Paths, out: Path) -> None:
+    """Static summaries the page shows next to the forecast: events, valuation, backtest."""
+    cars = pl.read_csv(paths.root / "results" / "event_cars.csv")
+    titles = pl.read_csv(paths.root / "data" / "ledger" / "catalysts.csv").select(
+        "event_id", "title", "stated_date", "ticker"
+    )
+    ev = (
+        cars.filter(
+            pl.col("primary")
+            & (pl.col("role") == "own")
+            & pl.col("car_m1p1").is_not_nan()
+            & (pl.col("security") != "NOVO-B.CO")  # cross-check listing of the same news as NVO
+        )
+        .join(titles, on="event_id", how="left", suffix="_l")
+        .unique(["event_id", "security"])
+        .sort("first_day0")
+        .select(
+            "event_id",
+            "security",
+            "event_type",
+            "title",
+            "first_day0",
+            "car_m1p1",
+            "sd_m1p1",
+            "confounded",
+            "surprise",
+        )
+    )
+    (out / "events.json").write_text(json.dumps(ev.to_dicts()), encoding="utf-8")
+    val = json.loads((paths.root / "results" / "valuation.json").read_text(encoding="utf-8"))
+    weekly = [
+        {k: w[k] for k in ("date", "ev_bn", "glp1_ttm_bn")} | {"peak": w["peak_c"]}
+        for w in val["weekly"]
+    ]
+    (out / "valuation.json").write_text(
+        json.dumps(
+            {
+                "latest": val["latest"],
+                "weekly": weekly,
+                "news": val["news_day_attribution"],
+                "grid": val["assumption_grid"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    sc = json.loads((paths.root / "results" / "forecast_scores.json").read_text(encoding="utf-8"))
+    cells = [
+        {k: c[k] for k in ("ticker", "h", "model", "period", "n", "crps", "c80")}
+        for c in sc["cells"]
+    ]
+    (out / "backtest.json").write_text(json.dumps(cells), encoding="utf-8")
+
+
 def run(paths: Paths, now: datetime | None = None, markets: list[dict] | None = None) -> dict:
     now = now or datetime.now(UTC)
     cars = pl.read_csv(paths.root / "results" / "event_cars.csv")
@@ -353,11 +430,10 @@ def run(paths: Paths, now: datetime | None = None, markets: list[dict] | None = 
     aci = load_aci(paths)
     scorecard = score_ledger(paths, prices, aci)
     markets = kalshi.fetch() if markets is None else markets
-    today = now.astimezone(ZoneInfo("America/New_York")).date()
     forecasts = []
     for tk in LIVE:
         f = forecast_one(tk, prices[tk], cars, cal, aci)
-        f["catalysts"] = catalyst_list(cal, tk, today, cars, markets)
+        f["catalysts"] = catalyst_list(cal, tk, date.fromisoformat(f["origin"]), cars, markets)
         f["history"] = [
             {"date": str(d), "close": round(c, 2)}
             for d, c in zip(prices[tk]["date"][-300:], prices[tk]["close"][-300:], strict=True)
@@ -372,6 +448,7 @@ def run(paths: Paths, now: datetime | None = None, markets: list[dict] | None = 
         ),
         encoding="utf-8",
     )
+    site_data(paths, out)
     (out / "scorecard.json").write_text(json.dumps(scorecard), encoding="utf-8")
     return {
         "ledger_added": added,
