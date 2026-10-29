@@ -39,3 +39,4 @@ Thumbs.db
 site/dist/
 site/qa-shots/
 site/preview.log
+*.log
